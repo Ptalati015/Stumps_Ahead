@@ -47,9 +47,30 @@ export const DENYLIST = new Set([
   'kumara', 'wickramasinghe', 'dissanayake', 'gunathilaka', 'jayawickrama', 'lakmal', 'kulasekara',
   'mahanama', 'gurusinha', 'kaluwitharana', 'tillakaratne', 'wettimuny', 'madugalle', 'mendis',
   'rathnayake', 'liyanage', 'vandersay', 'chameera', 'thushara', 'kamindu', 'udana', 'ratnayake',
-  'hettiarachchi', 'kandamby', 'gamage', 'jayasekera', 'wanigamuni', 'pushpakumara',
+  'hettiarachchi', 'kandamby', 'bandara', 'kleinveldt', 'dhawan', 'gamage', 'jayasekera', 'wanigamuni', 'pushpakumara',
 ]);
 
+// True for an exact match or a near miss: within 1 edit of a listed surname
+// of 5+ letters (Kleinveld vs Kleinveldt) or 2 edits of one with 6+ letters
+// (Charwal vs Chahal).
 export function isDenied(surname) {
-  return DENYLIST.has(surname.trim().toLowerCase());
+  const s = surname.trim().toLowerCase();
+  if (DENYLIST.has(s)) return true;
+  for (const real of DENYLIST) {
+    const allowed = real.length >= 6 ? 2 : real.length >= 5 ? 1 : 0;
+    if (allowed && Math.abs(real.length - s.length) <= allowed && editDistance(s, real) <= allowed) return true;
+  }
+  return false;
+}
+
+function editDistance(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length];
 }

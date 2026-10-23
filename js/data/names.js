@@ -41,7 +41,7 @@ const SURNAME_PARTS = {
     ['veld', 'hoek', 'kop', 'vlei', 'stad', 'fontein', 'kloof', 'dorp']],
   [['Nko', 'Mthe', 'Zwe', 'Mabhe', 'Dla', 'Sitho', 'Qhu', 'Mpo', 'Ntu'],
     ['sana', 'njwa', 'lethu', 'ngu', 'muzi', 'beka', 'fana', 'thando']]],
-  SL: [[['Amba', 'Bandara', 'Dehi', 'Gal', 'Kande', 'Liyana', 'Maha', 'Panni', 'Wella', 'Kotta', 'Hetti', 'Ruwan'],
+  SL: [[['Amba', 'Ruhu', 'Dehi', 'Gal', 'Kande', 'Liyana', 'Maha', 'Panni', 'Wella', 'Kotta', 'Hetti', 'Ruwan'],
     ['pitiya', 'gedara', 'wala', 'kissa', 'gama', 'watte', 'arachchi', 'goda', 'wela', 'deniya']]],
 };
 

@@ -34,6 +34,11 @@ test('denylist has at least 100 real surnames', () => {
   assert.ok(isDenied('Root') && isDenied('  KOHLI ') && isDenied('de Villiers'));
 });
 
+test('near misses of real surnames are rejected too', () => {
+  for (const s of ['Kleinveld', 'Bracwell', 'Charwal', 'Ashwick']) assert.ok(isDenied(s), s);
+  for (const s of ['Velkari', 'Ashcombe', 'Kaiwera']) assert.ok(!isDenied(s), s);
+});
+
 test('no surname in any pool is on the denylist', () => {
   for (const code of NATION_CODES) {
     const pool = surnamePool(code);
