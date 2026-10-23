@@ -272,7 +272,7 @@ export function mount(root, props, navigate) {
     }
     function finish(shot, timingMs) {
       played = true;
-      document.removeEventListener('keydown', onKey);
+      setKeyHandler(null);
       buttons.forEach((b) => {
         b.disabled = true;
         if (b.dataset.shot === shot) b.classList.add('pl-picked');
@@ -282,8 +282,7 @@ export function mount(root, props, navigate) {
       const label = shot === 'leave' || delivery.extra === 'wide' ? null : timingLabel(result.ball.timing, bat.timingMs);
       afterBall(result, label);
     }
-    document.addEventListener('keydown', onKey);
-    cleanups.add(() => document.removeEventListener('keydown', onKey));
+    setKeyHandler(onKey);
 
     commentary.textContent = `${playerById(state, currentInnings(state).bowlerId).name} runs in...`;
     later(() => {
@@ -393,14 +392,11 @@ export function mount(root, props, navigate) {
         press();
       }
     }
-    document.addEventListener('keydown', onKey);
-    cleanups.add(() => document.removeEventListener('keydown', onKey));
-    stopKeys = () => document.removeEventListener('keydown', onKey);
+    setKeyHandler(onKey);
   }
-  let stopKeys = () => {};
 
   function deliver(bowl) {
-    stopKeys();
+    setKeyHandler(null);
     const delivery = previewDelivery(state, bowl);
     const bat = aiBat(state, bowl);
     placeMarker(delivery.line, delivery.length, delivery.extra);
@@ -411,7 +407,13 @@ export function mount(root, props, navigate) {
     });
   }
 
-  const cleanups = new Set();
+  // At most one keyboard handler is live at a time.
+  let keyHandler = null;
+  function setKeyHandler(fn) {
+    if (keyHandler) document.removeEventListener('keydown', keyHandler);
+    keyHandler = fn;
+    if (fn) document.addEventListener('keydown', fn);
+  }
 
   next();
 
@@ -421,8 +423,7 @@ export function mount(root, props, navigate) {
     frames.forEach(cancelAnimationFrame);
     timeouts.clear();
     frames.clear();
-    cleanups.forEach((fn) => fn());
-    cleanups.clear();
+    setKeyHandler(null);
     root.textContent = '';
   };
 }

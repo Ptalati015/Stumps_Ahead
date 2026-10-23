@@ -40,7 +40,7 @@ function newMatch() {
     overs: Number(q.get('overs')) || 2,
     battingFirst: q.get('bat') === 'ai' ? 'ai' : 'user',
     difficulty: q.get('difficulty') || 'normal',
-    seed: Number(q.get('seed')) || undefined,
+    seed: q.has('seed') ? Number(q.get('seed')) : undefined,
   }));
 }
 

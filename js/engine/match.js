@@ -15,6 +15,7 @@ const clone = (state) => structuredClone(state);
 export function createMatch(config) {
   const { userTeam, aiTeam } = config ?? {};
   if (!userTeam?.players?.length || !aiTeam?.players?.length) throw new Error('createMatch: both teams need players');
+  if (userTeam.code === aiTeam.code) throw new Error('createMatch: teams must be different nations');
   const overs = [2, 5, 10].includes(config.overs) ? config.overs : 5;
   const seed = Number.isFinite(config.seed) ? config.seed : Date.now();
   const first = config.battingFirst === 'ai' ? aiTeam : userTeam;

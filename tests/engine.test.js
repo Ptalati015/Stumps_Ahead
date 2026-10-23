@@ -64,6 +64,10 @@ test('createMatch sets up first innings and does not need a bowler yet', () => {
   assert.equal(runRate(s.innings[0]), 0);
 });
 
+test('createMatch rejects the same nation on both sides', () => {
+  assert.throws(() => createMatch(fixtureConfig({ aiTeam: fixtureConfig().userTeam })));
+});
+
 test('playBall does not mutate the state passed in', () => {
   const s = started();
   const before = JSON.stringify(s);
