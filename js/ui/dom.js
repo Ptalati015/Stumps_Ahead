@@ -11,6 +11,8 @@ export function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(props)) {
     if (value === undefined || value === null || value === false) continue;
+    // Keep the text-node guarantee: markup can't sneak in through a prop.
+    if (key === 'innerHTML' || key === 'outerHTML') throw new Error(`el(): ${key} is not allowed`);
     if (key === 'className') node.className = value;
     else if (key === 'onClick') node.addEventListener('click', value);
     else if (key === 'dataset') Object.assign(node.dataset, value);
