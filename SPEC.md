@@ -17,7 +17,7 @@ A short-format cricket game that runs in a mobile browser, inspired by EA Sports
 - Plain HTML, CSS and JavaScript using native ES modules. **No framework, no build step, no npm runtime dependencies.**
 - Rendering: DOM for menus and scoreboard; a single `<canvas>` (or simple CSS animation) for the delivery view during play.
 - Run locally with any static server: `python3 -m http.server 8000` and open `http://localhost:8000`. (ES modules do not load from `file://`.)
-- Tests: Node's built-in runner, `node --test tests/`. Engine and name generator must be pure modules with no DOM access so they can be tested in Node.
+- Tests: Node's built-in runner, `node --test` (Node 22 does not accept a directory argument; it finds `tests/*.test.js` itself). Engine and name generator must be pure modules with no DOM access so they can be tested in Node.
 - Deploy target: GitHub Pages from `main` (static files only).
 
 ## 3. Screen flow
@@ -171,6 +171,8 @@ tests/names.test.js        Joel
  */
 ```
 
+Engines may add extra fields beyond these shapes; UI code must treat them as optional. Current engine additions: `MatchState.rngState`, `MatchState.lastBowlerId`, `Innings.extras {wides, noballs}`, and `BallResult.shot`, `delivery`, `bowlerId`, `batterId`.
+
 ### Functions
 
 Engine (Ayush), all pure, no DOM, in `js/engine/match.js`:
@@ -184,6 +186,8 @@ aiBat(state, bowl: BowlInput): BatInput
 playBall(state, bowl: BowlInput, bat: BatInput): { state: MatchState, ball: BallResult }
 startSecondInnings(state): MatchState      // status 'innings_break' -> 'awaiting_bowler'
 oversText(innings): string                 // '3.4'
+// read-only helpers: currentInnings, playerById, runRate, chaseInfo, previewDelivery, isUserBatting
+// randomness is carried in state.rngState, so screens never need their own rng for match play
 ```
 Engine functions return new state objects; UI must not mutate state directly.
 
@@ -234,7 +238,7 @@ These are the usual "vibe-coded game" bugs. Each one is a release blocker.
 7. **State:** Play Again starts a clean match (no leftover scores); browser refresh simply restarts.
 8. **Security (Mark):** render names and commentary with `textContent`, never `innerHTML` with interpolated strings; no `eval` or `new Function`; no third-party scripts, CDNs, analytics or trackers; a strict CSP meta tag (`default-src 'self'`); no secrets in the repo.
 9. **Copyright (Mark):** no real player surnames (denylist test passes), no EA, Real Cricket, ICC, IPL or board logos, names or assets. Nation names and plain colours are fine.
-10. **Quality:** zero console errors during a full match; `node --test tests/` passes; the game is playable start to finish at 360px wide in Chrome DevTools mobile mode and on a real phone if possible.
+10. **Quality:** zero console errors during a full match; `node --test` (Node 22 does not accept a directory argument; it finds `tests/*.test.js` itself) passes; the game is playable start to finish at 360px wide in Chrome DevTools mobile mode and on a real phone if possible.
 
 ## 9. Plan to 9am
 
