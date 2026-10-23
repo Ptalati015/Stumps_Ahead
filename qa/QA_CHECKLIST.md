@@ -3,7 +3,8 @@
 What Violet (QA) checks on every PR. Tools in this folder:
 
 - `node qa/check-names.mjs [dir]` fails if any name-shaped string matches a real cricketer's surname (list in `qa/real-surnames.mjs`).
-- `node qa/smoke.mjs [dir] [taps]` opens the app headless at 375px wide, taps random buttons, and reports console errors, uncaught exceptions and horizontal overflow. It saves `qa/last-smoke.png`.
+- `node --test tests/qa-invariants.test.js` plays 270 AI-vs-AI matches (2/5/10 overs, both toss outcomes, all difficulties) and checks every scorecard adds up and every ball follows the rules.
+- `node qa/smoke.mjs [dir] [taps] [page]` opens the app headless at 375px wide, taps random buttons, and reports console errors, uncaught exceptions and horizontal overflow. It saves `qa/last-smoke.png`.
 
 ## Match engine
 
