@@ -1,6 +1,6 @@
 // Headless mobile smoke test. Serves a folder, opens it at phone size, taps
 // random visible buttons, and reports console errors, uncaught exceptions and
-// horizontal overflow. Usage: node qa/smoke.mjs [dir] [taps]
+// horizontal overflow. Usage: node qa/smoke.mjs [dir] [taps] [page path]
 // Needs playwright, either in the project or installed globally.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -27,11 +27,13 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': TYPES[extname(path)] ?? 'text/html' }).end(body);
   } catch { res.writeHead(404).end(); }
 }).listen(0);
-const url = `http://localhost:${server.address().port}/`;
+const url = `http://localhost:${server.address().port}/${process.argv[4] ?? ''}`;
 
 const problems = [];
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: PHONE_WIDTH, height: 667 }, isMobile: true, hasTouch: true });
+// Screens re-render between taps, so a stale button must fail fast, not wait 30s.
+page.setDefaultTimeout(1000);
 page.on('console', m => { if (m.type() === 'error') problems.push(`console.error: ${m.text()}`); });
 page.on('pageerror', e => problems.push(`uncaught: ${e.message}`));
 await page.goto(url);
@@ -48,14 +50,21 @@ const checkOverflow = async label => {
 };
 await checkOverflow('first screen');
 
-for (let i = 0; i < taps; i++) {
+// Stop after `taps` taps or 90 seconds. Waits while every button is disabled
+// (run-up, ball in flight), so a match keeps moving.
+const deadline = Date.now() + 90_000;
+for (let i = 0; i < taps && Date.now() < deadline; ) {
   const buttons = await page.locator('button:visible, [role=button]:visible, a:visible').all();
   const enabled = [];
   for (const b of buttons) if (await b.isEnabled().catch(() => false)) enabled.push(b);
-  if (!enabled.length) break;
+  if (!enabled.length) {
+    await page.waitForTimeout(100);
+    continue;
+  }
   const b = enabled[Math.floor(Math.random() * enabled.length)];
   const text = (await b.innerText().catch(() => '')).trim().slice(0, 30);
-  await b.tap({ timeout: 2000 }).catch(() => {});
+  await b.tap().catch(() => {});
+  i++;
   await checkOverflow(`after tap ${i} ("${text}")`);
 }
 await page.screenshot({ path: new URL('./last-smoke.png', import.meta.url).pathname, fullPage: true });
