@@ -238,7 +238,7 @@ These are the usual "vibe-coded game" bugs. Each one is a release blocker.
 7. **State:** Play Again starts a clean match (no leftover scores); browser refresh simply restarts.
 8. **Security (Mark):** render names and commentary with `textContent`, never `innerHTML` with interpolated strings; no `eval` or `new Function`; no third-party scripts, CDNs, analytics or trackers; a strict CSP meta tag (`default-src 'self'`); no secrets in the repo.
 9. **Copyright (Mark):** no real player surnames (denylist test passes), no EA, Real Cricket, ICC, IPL or board logos, names or assets. Nation names and plain colours are fine.
-10. **Quality:** zero console errors during a full match; `node --test` (Node 22 does not accept a directory argument; it finds `tests/*.test.js` itself) passes; the game is playable start to finish at 360px wide in Chrome DevTools mobile mode and on a real phone if possible.
+10. **Quality:** zero console errors during a full match; `node --test` passes; the game is playable start to finish at 360px wide in Chrome DevTools mobile mode and on a real phone if possible.
 
 ## 9. Plan to 9am
 
