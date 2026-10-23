@@ -25,6 +25,7 @@
   -webkit-touch-callout: none;
 }
 .pl *, .pl *::before, .pl *::after { box-sizing: inherit; }
+.pl [hidden] { display: none !important; }
 
 .pl-mini {
   display: flex;
