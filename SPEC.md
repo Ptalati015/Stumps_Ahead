@@ -509,3 +509,57 @@ Joel lands the scene API stubs first, as in phase 3. Ayush's PR merges first if 
 5. Red, white and pink are all selectable. Pink shows the night look and red and white don't. Neither the venue nor the ball changes any score for a fixed seed.
 6. `v1.0.0` shows on the menu and result screens. After the release PR it reads `v1.1.0`, and `CHANGELOG.md` lists the Phase 4 changes.
 7. No new `innerHTML`, no new dependencies, and drag handlers are removed in `unmount`. All existing tests, QA scripts and the smoke test at 375px pass with no console errors.
+
+## 14. v1.2.0: venue screen and realistic swing path
+
+Talati's feedback on v1.1.0: give venue choice its own, better-looking screen, and fix a bug where a swinging yorker leaves the pitch and comes back. Rules, scoring, the engine's outcome logic and every other screen stay as they are.
+
+### 14.1 Venue screen (Joel)
+
+**New flow:** Menu → Team Select → Match Setup (overs, difficulty, ball) → **Venue** → Toss → Play. The Venue picker is removed from Match Setup, and that screen's main button becomes "Next: venue". The Venue screen has Back (to Setup) and "Play at <ground>" (to Toss).
+
+**What it looks like:**
+- **Heading:** "Choose your ground", with the two team badges as on Setup.
+- **Four ground cards:** the user's two grounds first with a **Home** tag in the user's team colours, then the opponent's two with an **Away** tag. On a phone they form a 2×2 grid; on a wide screen, a single row of four.
+- **Each card shows:**
+  - a small stylised illustration, inline SVG drawn by us: an oval in the ground's stand colours, a pitch strip, a scoreboard block, and the venue's sky tint;
+  - the ground name, with the city underneath;
+  - a one-line tagline we write ourselves. It must be descriptive and factual, for example "Test cricket's oldest home ground in London". No quotes, slogans, sponsor names or logos.
+- **When the ball is pink:** every illustration switches to its night version, with a dark sky and four floodlights. The user sees the night match they chose.
+- **The selected card:** slightly larger, with a gold border and a soft glow. The others are dimmed a little. The user's first home ground is selected by default.
+- **Touch:** cards are at least 44 px tall and selected with `pointerup` or `click`, so scrolling the grid never selects one. They also work by keyboard, as radio buttons with arrow-key support.
+
+**Data:** taglines and the illustration theme live in `js/data/venues.js` (add `tagline`; the stand colours and sky tint already exist). The venue still has no effect on the engine.
+
+### 14.2 Swing path bug (Ayush)
+
+**Bug:** with Outswing or Inswing (worst on a yorker), the drawn ball swerves well outside the pitch and then comes back to land on the spot.
+
+**Cause:** `deliveryPath()` in `js/ui/scene/scene.js` fits one curve through both the bounce point and the arrival point. On a yorker the bounce comes just before arrival. The fit then turns unstable and produces large opposite-signed terms: a big detour in the air that cancels out at the end.
+
+**Fix:** swing is something that happens in the air.
+- Before the bounce, the ball follows a gentle curve from release to the landing spot. Its sideways movement is within `|swingX|` of the straight line and grows smoothly, roughly with t², so it looks like late swing.
+- After the bounce, the ball travels in a straight line, with no more swing. Spin turn stays as now: straight in the air, with the turn after the bounce.
+- The ball's x position is kept within the pitch (|x| ≤ 1.52 m) for the whole path. The only exception is a delivery the engine already called a wide, which may finish outside.
+- The landing spot (`path.bounce`) and the arrival line are unchanged, so outcomes and the marker still agree.
+
+**Ownership exception:** Ayush owns `deliveryPath()` and `tests/scene-path.test.js` for this fix only. Joel doesn't touch that function in this phase, so the two PRs don't overlap.
+
+**Tests:**
+- Every combination of length (yorker, full, good, short), variation (stock, in, out) and handedness (R and L) keeps the path within the pitch at 50 sample points, except wides.
+- The path's sideways distance from the straight release-to-landing line never exceeds `|swingX| + 0.05` m.
+- After the bounce, the path is straight.
+- The existing scene-path tests still pass.
+
+### 14.3 Release
+
+After both PRs merge, Karen bumps `VERSION` to `1.2.0` and adds a CHANGELOG entry in a release PR, as in 13.6.
+
+### 14.4 Done when (Violet and Mark)
+
+1. The flow is Setup → Venue → Toss. Setup no longer has a venue picker, and Back from Venue returns to Setup with its choices kept.
+2. All four cards show the right home/away tags, names, cities and taglines, for both a home pick and an away pick. The pink ball shows night illustrations. Everything fits at 375 px with no horizontal scroll.
+3. The chosen ground carries through to toss, play and result, as in v1.1.0.
+4. On every length, inswing and outswing bowled from both ends to right- and left-handed batters stays on the pitch. The swing reads as a smooth late curve, with no detour.
+5. Seeded match results are identical to v1.1.0, because the engine is unchanged.
+6. No new `innerHTML` (the SVG is built with the existing helpers), no new dependencies, taglines are our own words, and no logos are used. All tests, the QA scripts and the smoke test pass.
