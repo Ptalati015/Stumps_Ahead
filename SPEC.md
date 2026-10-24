@@ -286,7 +286,7 @@ Talati's feedback on the play view: the batter should be movable before the ball
 - Swipe direction sets where the ball goes. Up means straight back past the bowler. Toward the off side means cover or point. Down and to the side means square or behind square. This is mirrored for left-handers.
 - Timing is taken at the moment the swipe passes 30 px, using the same windows as today (perfect ±60 ms, and so on).
 - A tap with no swipe means Defend.
-- A swipe longer than 40% of the zone height, or any swipe while the **Loft** toggle is on, is played in the air.
+- A swipe longer than max(110 px, 40% of the zone height) (the phone swipe zone is only about 100 px tall, so 40% alone made almost every swipe a loft), or any swipe while the **Loft** toggle is on, is played in the air.
 - The shot type comes from the swipe angle and aerial flag:
 
 | Swipe sector (right-hander, 0° = straight up) | Ground shot | In the air |
