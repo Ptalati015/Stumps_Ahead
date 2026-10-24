@@ -286,6 +286,10 @@
   .pl-bowling { gap: 4px; }
   .pl-bowling .pl-seg-btn { min-height: 36px; padding: 3px 2px; font-size: 13px; line-height: 1.15; }
   .pl-bowling .pl-side-btn { min-height: 34px; }
+  /* Batting with the direction pad: shorter move arrows and hint, so the
+     whole stack (hint included) ends inside a 667 px viewport. */
+  .pl-move-left, .pl-move-right { min-height: 40px; font-size: 20px; }
+  .pl-batting .pl-hint { font-size: 12px; line-height: 1.2; }
   .pl-bowling .pl-go { min-height: 44px; }
 }
 
