@@ -579,10 +579,7 @@ Talati's feedback on v1.2.0 covers three things. Some balls on middle stump, inc
 - **Never a wide:** anything with |x| ≤ 0.45 m on the off side, and every ball on the stumps line (|x| ≤ 0.2), whatever its length or variation. That includes yorkers.
 - **How wides still happen:** inaccuracy. Low meter accuracy scatters the arrival point, and a scatter past a wide line makes the ball a wide. Preset (button) deliveries get a continuous arrival x from their line plus scatter, so the same rule applies to them.
 - **No-balls:** they stay a small random overstep chance, because a no-ball is about the front foot, not the line. The overstep is rolled first, and a no-ball is never also a wide.
-- **Angle and the ring (Talati, 2026-10-24):** the real angle stays. A ring placed on the stumps can still arrive wide when the angle carries it past a wide line, for example around the wicket to a left-hander with a short ball on middle. To make this visible before the ball is bowled, a small **arrival marker** at the batter's crease shows where the ball will reach the batter. It appears while the user places the ring or changes Line, Length, Variation or Side, at 100% accuracy and including the expected swing. It turns red when that point is past a wide line.
-  - play.js (Ayush) computes the point with the existing `releaseXFor` and `arrivalFromPitch` helpers in outcomes.js, plus the expected swing.
-  - The scene (Joel) draws it with `scene.setArrivalMarker({ x, wide } | null)`.
-  - It is hidden while the user bats and once the ball is released.
+- **Angle and the ring (Talati, 2026-10-24):** the real angle stays. A ring placed on the stumps can still arrive wide when the angle carries it past a wide line, for example around the wicket to a left-hander with a short ball on middle. v1.3.0 showed an arrival marker for this. Talati asked for it to be removed in v1.3.1 (PR #21). The engine still decides wides from `arrivalX`, and the `expectedArrival` helper can be reused if a preview comes back later.
 - The ring's nearest legal spot is now 1.5 m in front of the batter's stumps (`PITCH_LIMITS.zMin`, was 0.5 m), so it can't sit behind the crease. The yorker bucket is still z < 2.5.
 - **Scene:** the scene draws the wide where the engine put it, from `delivery.arrivalX`, which is added to the returned delivery. It no longer uses a fixed off or leg position.
 - **Balance:** compare wides per over against v1.2.0, AI vs AI on Normal. It should stay within about ±30%. If it falls a lot, raise the scatter slightly rather than bringing back random wides.
@@ -637,7 +634,7 @@ Only an explicit `side` sets the angle effect, so an input without `side` plays 
 
 | Ayush | Joel |
 |---|---|
-| `js/engine/outcomes.js`, `match.js`, `ai.js`, engine tests | `js/ui/scene/scene.js`, except `deliveryPath()` (run-up and umpire mirroring, `showAim` removal, wide drawing from `arrivalX`, `setArrivalMarker`) |
+| `js/engine/outcomes.js`, `match.js`, `ai.js`, engine tests | `js/ui/scene/scene.js`, except `deliveryPath()` (run-up and umpire mirroring, `showAim` removal, wide drawing from `arrivalX`) |
 | `deliveryPath()` + `tests/scene-path.test.js` (releaseX) | `css/play.css` (Over/Around toggle styling, removed Aerial toggle) |
 | `js/ui/screens/play.js` (toggle, swipe removal, hint), `js/ui/input/swipe.js` | |
 | `js/types.js` (`BowlInput.side`, delivery `releaseX`/`arrivalX`) | |
@@ -650,7 +647,7 @@ Ayush's PR merges first. Karen bumps `VERSION` to `1.3.0` and adds a CHANGELOG e
    - no ball whose arrival |x| ≤ 0.45 m on the off side or ≤ 0.2 m on the stumps line is ever a wide;
    - every wide is beyond a wide line;
    - wides per over stay within about ±30% of v1.2.0.
-2. **Yorkers and the arrival marker:** a yorker on middle at 100% accuracy is never a wide unless the arrival marker showed red. At 100% accuracy the swing amount is exactly 0.325 m, and the spread (0.25 to 0.40 m) grows as accuracy drops, using the same rng draws. So the marker matches the engine's arrival point to within 0.05 m for every side, handedness, length and variation, and turns red exactly when that point is past a wide line.
+2. **Yorkers:** a yorker on middle at 100% accuracy, over the wicket to a right-hander, is never a wide. At 100% accuracy the swing amount is exactly 0.325 m, and the spread (0.25 to 0.40 m) grows as accuracy drops. (The arrival-marker checks from v1.3.0 were dropped along with the marker in v1.3.1.)
 3. **Over/Around:** the toggle works and persists between balls. The bowler visibly runs in from the chosen side and the umpire swaps. The ball angles in for over to a right-hander and around to a left-hander, and across for around to a right-hander and over to a left-hander. It stays on the pitch except for wides.
 4. **Batting input:** there is no swipe-to-hit, no aim arrow and no Aerial toggle. Every shot button still works and the hit line still shows. Moving the batter by ◀ ▶ and by drag works before release.
 5. **Compatibility:** seeded results without the `side` field match v1.2.0, apart from the intended wide-rule change.
