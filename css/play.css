@@ -136,12 +136,12 @@
 .pl-shot { min-height: 60px; font-size: 18px; }
 .pl-hint { grid-column: 1 / -1; margin: 0; color: var(--pl-muted); font-size: 14px; text-align: center; }
 
-/* Phase 3 batting: swipe zone over the lower half of the scene, move buttons
-   and the Loft toggle. play.js sets the zone's position and touch-action. */
+/* Batting: drag zone over the lower half of the scene for moving the batter
+   before release (no swipe-to-hit since v1.3.0), and the move buttons.
+   play.js sets the zone's position and touch-action. */
 .pl-swipe {
-  background: linear-gradient(to top, rgba(255, 210, 63, 0.12), rgba(255, 210, 63, 0) 70%);
-  border-top: 1px dashed rgba(255, 255, 255, 0.28);
-  cursor: crosshair;
+  background: linear-gradient(to top, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 60%);
+  cursor: ew-resize;
   -webkit-tap-highlight-color: transparent;
 }
 .pl-move-row {
@@ -151,8 +151,6 @@
   gap: 8px;
 }
 .pl-move-left, .pl-move-right { min-height: 48px; font-size: 22px; line-height: 1; }
-.pl-loft { min-height: 48px; font-size: 16px; }
-.pl-loft[aria-pressed='true'], .pl-loft.pl-picked { background: var(--pl-accent); color: #111; opacity: 1; }
 
 .pl-label { display: block; margin: 0 0 4px; color: var(--pl-muted); font-size: 14px; }
 .pl-seg-row { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
@@ -250,8 +248,8 @@
   .pl-speed { top: 14px; right: 18px; font-size: 18px; }
 }
 
-/* Phones: one row of five shot buttons so the scene (and its swipe zone)
-   keeps most of the height once the move/Aerial row is shown. */
+/* Phones: one row of five shot buttons so the scene (and its drag zone)
+   keeps most of the height once the move row is shown. */
 @media (max-width: 899px) {
   .pl-shots { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
   .pl-shot { min-height: 48px; padding: 6px 2px; font-size: 15px; }
@@ -269,3 +267,11 @@
 .sc--drag .sc-marker--held { animation: none; fill: rgba(255, 210, 63, 0.45); }
 @keyframes sc-ring { 50% { stroke-opacity: 0.45; } }
 @media (prefers-reduced-motion: reduce) { .sc--drag .sc-marker { animation: none; } }
+
+/* v1.3.0: Over / Around the wicket toggle, above Line (SPEC 15.2). Two wide
+   halves with a small arrow showing which side of the stumps the bowler runs. */
+.pl-side .pl-seg-row { grid-template-columns: 1fr 1fr; grid-auto-flow: row; }
+.pl-side-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-weight: 700; }
+.pl-side-btn::before { content: '\25B8'; font-size: 0.85em; opacity: 0.55; }
+.pl-side-btn:first-child::before { content: '\25C2'; }
+.pl-side-btn[aria-pressed='true']::before, .pl-side-btn.pl-picked::before { opacity: 1; }
