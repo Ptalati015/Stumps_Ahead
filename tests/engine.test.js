@@ -241,8 +241,11 @@ function scriptedMatch(extra = () => ({})) {
 }
 
 test('leaving the new BatInput fields out scores exactly as before phase 3', () => {
-  // Captured from the engine at 55f0fe5, before offsetX/aimDeg/aerial existed.
-  const before = '1 1 2 4 6 0 1 6 1 0 0W 0 0 4 2 4 6 0 2 4 4 0 0W 0 0 2 4 2 6 0 0 2 1 0W 6 0 0 4 2 2 1 0W 0 0 1 4 6 0 0 1 0W 1 0w 0 0 1 1 2 4 0 0 | India won by 22 runs';
+  // v1.3 fingerprint. Up to v1.2 (55f0fe5 to d6eb728) it was
+  // '1 1 2 4 6 0 1 6 1 0 0W 0 0 4 2 4 6 0 2 4 4 …| India won by 22 runs'; the
+  // first 17 balls still match, then ball 18 scatters past the leg-wide line
+  // under the SPEC 15.1 rule and the match goes its own way from there.
+  const before = '1 1 2 4 6 0 1 6 1 0 0W 0 0 4 2 4 6 0w 1 4 4 0 0W 0 0 2 4 2 6 0 0 0w 0 0W 0W 0 0 2 4 1 4 0 0 0 0 1 0W 0 0 4 0n 0 1 0 0 1 0 4 6 0 2 1 4n 0W | India won by 24 runs';
   assert.equal(scriptedMatch(), before);
   // Aim and aerial only change where the ball goes, never the score.
   assert.equal(scriptedMatch((i) => ({ offsetX: 0, aimDeg: (i * 53) % 360 - 180, aerial: i % 2 === 0 })), before);
@@ -427,19 +430,138 @@ test('outswing raises edges and inswing raises bowled/LBW over 2,000 balls', () 
 });
 
 test('the AI bowler uses fine spots and variations about 30% of the time', () => {
-  let s = createMatch(fixtureConfig({ overs: 10, seed: 3 }));
   let fancy = 0, total = 0;
-  while (s.status !== 'complete' && total < 300) {
-    if (s.status === 'innings_break') { s = startSecondInnings(s); continue; }
-    if (s.status === 'awaiting_bowler') { s = setBowler(s, aiChooseBowler(s)); continue; }
-    const bowl = aiBowl(s);
-    if (bowl.pitch) {
-      fancy++;
-      assert.ok(['stock', 'in', 'out', 'slower'].includes(bowl.variation));
+  for (let seed = 1; total < 600; seed++) {
+    let s = createMatch(fixtureConfig({ overs: 10, seed }));
+    while (s.status !== 'complete') {
+      if (s.status === 'innings_break') { s = startSecondInnings(s); continue; }
+      if (s.status === 'awaiting_bowler') { s = setBowler(s, aiChooseBowler(s)); continue; }
+      const bowl = aiBowl(s);
+      if (bowl.pitch) {
+        fancy++;
+        assert.ok(['stock', 'in', 'out', 'slower'].includes(bowl.variation));
+      }
+      total++;
+      s = playBall(s, bowl, aiBat(s, bowl)).state;
     }
-    total++;
-    s = playBall(s, bowl, aiBat(s, bowl)).state;
   }
   const share = fancy / total;
   assert.ok(share > 0.2 && share < 0.4, `share ${share}`);
+});
+
+// ---- SPEC 15: wides from the arrival point, over/around the wicket ----
+import { WIDE_X, LEG_WIDE_X, releaseXFor, arrivalFromPitch, VARIATIONS } from '../js/engine/outcomes.js';
+import { aiSide } from '../js/engine/ai.js';
+
+const PACE = { bowling: 80, bowlType: 'pace' };
+const SPOT_Z = { yorker: 1.5, full: 3.8, good: 6.4, short: 9.5 };
+const SPOT_X = { off: -0.2, middle: 0, leg: 0.2 };
+
+test('a ball is a wide exactly when it arrives past a wide line', () => {
+  let wides = 0;
+  for (const line of ['off', 'middle', 'leg']) for (const length of Object.keys(SPOT_Z)) for (const variation of VARIATIONS)
+    for (const side of ['over', 'around']) for (const bats of ['R', 'L']) for (const placed of [false, true]) {
+      for (let i = 0; i < 120; i++) {
+        const bowl = { line, length, variation, side, accuracy: (i % 10) / 10 };
+        if (placed) bowl.pitch = { x: SPOT_X[line], z: SPOT_Z[length] };
+        const d = prepareDelivery(bowl, PACE, createRng(i * 104729 + 7), { bats });
+        const past = d.arrivalX < WIDE_X || d.arrivalX > LEG_WIDE_X;
+        if (d.extra === 'noball') continue; // a no-ball is called first
+        assert.equal(d.extra === 'wide', past, `${line} ${length} ${variation} ${side} ${bats} arrivalX ${d.arrivalX}`);
+        if (Math.abs(d.arrivalX) <= 0.2 || (d.arrivalX < 0 && d.arrivalX >= -0.45)) assert.notEqual(d.extra, 'wide');
+        if (d.extra === 'wide') wides++;
+      }
+    }
+  assert.ok(wides > 0, 'wides still happen through scatter');
+});
+
+test('a yorker on middle at full accuracy is never a wide', () => {
+  for (const side of ['over', 'around']) for (const bats of ['R', 'L']) for (const variation of VARIATIONS) {
+    for (let i = 0; i < 300; i++) {
+      const rng = () => createRng(i * 7919 + 3);
+      for (const pitch of [undefined, { x: 0, z: 1.5 }]) {
+        const d = prepareDelivery({ line: 'middle', length: 'yorker', accuracy: 1, variation, side, pitch }, PACE, rng(), { bats });
+        assert.notEqual(d.extra, 'wide', `${side} ${bats} ${variation} ${pitch ? 'placed' : 'button'} arrivalX ${d.arrivalX}`);
+      }
+    }
+  }
+});
+
+test('over and around set the release point, mirrored for a left-hander', () => {
+  const d = (bowl, bats) => prepareDelivery({ line: 'off', length: 'good', ...bowl }, PACE, createRng(1), { bats });
+  assert.equal(d({}, 'R').side, 'over');
+  assert.equal(d({}, 'R').releaseX, -0.25);
+  assert.equal(d({}, 'L').releaseX, 0.25);
+  assert.equal(d({ side: 'around' }, 'R').releaseX, 0.85);
+  assert.equal(d({ side: 'around' }, 'L').releaseX, -0.85);
+  assert.equal(d({}, 'R').angle, null, 'no side given: plays as v1.2');
+  assert.equal(d({ side: 'around' }, 'R').angle, 'in');
+  assert.equal(d({ side: 'over' }, 'L').angle, 'in');
+  assert.equal(d({ side: 'over' }, 'R').angle, 'across');
+  assert.equal(d({ side: 'around' }, 'L').angle, 'across');
+  // A placed ball carries on along its line from the release point.
+  const placed = d({ side: 'around', pitch: { x: 0, z: 6.4 }, accuracy: 1 }, 'R');
+  assert.ok(Math.abs(placed.arrivalX - Math.round(arrivalFromPitch(0.85, 0, 6.4) * 100) / 100) < 1e-9);
+  assert.ok(placed.arrivalX < 0, 'from around, a ball pitched on middle goes on across the right-hander');
+  assert.equal(releaseXFor('nonsense', 'R'), -0.25);
+});
+
+test('angling in finds more bowled and lbw on a straight line', () => {
+  const count = (angle) => {
+    let outs = 0;
+    for (let i = 0; i < 6000; i++) {
+      const r = resolveOutcome({
+        delivery: { line: 'middle', length: 'good', kph: 135, travelMs: 600, extra: null, variation: 'stock', angle },
+        bat: { shot: 'drive', timingMs: (i % 9) * 40 - 160 },
+        batter: { batting: 60 }, bowler: { bowling: 70 }, difficulty: 'normal', userBatting: false, rng: createRng(i + 11),
+      });
+      if (r.wicketKind === 'bowled' || r.wicketKind === 'lbw') outs++;
+    }
+    return outs;
+  };
+  const plain = count(null);
+  const angled = count('in');
+  assert.ok(angled > plain, `${angled} vs ${plain}`);
+  assert.ok(angled < plain * 1.4, 'only a little');
+});
+
+test('the AI goes around for about 15% of overs to right-handers and 30% to left-handers', () => {
+  for (const [bats, want] of [['R', 0.15], ['L', 0.3]]) {
+    const team = (t) => ({ ...t, players: t.players.map((p) => ({ ...p, bats })) });
+    let around = 0, overs = 0;
+    for (let seed = 1; seed <= 150; seed++) {
+      const s = createMatch(fixtureConfig({ seed, overs: 10, userTeam: team(fixtureConfig().userTeam), aiTeam: team(fixtureConfig().aiTeam) }));
+      for (let over = 0; over < 10; over++) {
+        const st = { ...s, innings: [{ ...s.innings[0], legalBalls: over * 6 }] };
+        if (aiSide(st) === 'around') around++;
+        overs++;
+      }
+    }
+    assert.ok(Math.abs(around / overs - want) < 0.05, `${bats}: ${around / overs}`);
+  }
+});
+
+test('commentary notes a bowler switching sides', () => {
+  let s = setBowler(createMatch(fixtureConfig({ seed: 5 })), aiChooseBowler(createMatch(fixtureConfig({ seed: 5 }))));
+  const bat = { shot: 'defend', timingMs: 0 };
+  const play = (side) => {
+    const r = playBall(s, { line: 'off', length: 'good', accuracy: 1, side }, bat);
+    s = r.state;
+    return r.ball.commentary;
+  };
+  assert.doesNotMatch(play('over'), /switches/);
+  assert.match(play('around'), /switches to around the wicket\./);
+  assert.doesNotMatch(play('around'), /switches/);
+  assert.match(play('over'), /switches to over the wicket\./);
+});
+
+test('AI vs AI wides per over stay close to v1.2 (0.196 on Normal)', () => {
+  const team = (t) => ({ ...t, players: t.players.map((p, i) => ({ ...p, bats: i % 3 === 1 ? 'L' : 'R' })) });
+  let wides = 0, legal = 0;
+  for (let seed = 1; seed <= 150; seed++) {
+    const s = simulateMatch(fixtureConfig({ seed, overs: 5, userTeam: team(fixtureConfig().userTeam), aiTeam: team(fixtureConfig().aiTeam) }));
+    for (const inn of s.innings) { wides += inn.extras.wides; legal += inn.legalBalls; }
+  }
+  const perOver = wides / (legal / 6);
+  assert.ok(perOver > 0.137 && perOver < 0.255, `wides per over ${perOver}`);
 });

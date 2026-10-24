@@ -122,3 +122,34 @@ test('a wide may finish off the pitch', () => {
   const path = deliveryPath({ ...base, extra: 'wide', line: 'off', length: 'short', pitch: { x: -1, z: 12 }, swingX: -0.4, variation: 'out' }, -1);
   assert.ok(Math.abs(path(path.T).x) > 1.52);
 });
+
+// SPEC 15: release from over/around the wicket, arrival from the engine.
+import { prepareDelivery } from '../js/engine/outcomes.js';
+import { createRng } from '../js/engine/rng.js';
+
+test('the ball leaves from releaseX, mirrored for a left-hander, and arrives at arrivalX', () => {
+  for (const off of [-1, 1]) {
+    const bats = off === -1 ? 'R' : 'L';
+    for (const side of ['over', 'around']) {
+      for (const pitch of [undefined, { x: 0.05, z: 5 }]) {
+        const d = prepareDelivery({ line: 'middle', length: 'good', accuracy: 0.8, side, pitch }, { bowling: 70 }, createRng(9), { bats });
+        const path = deliveryPath(d, off);
+        assert.ok(near(path(0).x, d.releaseX * -off));
+        assert.ok(near(path(path.T).x, d.arrivalX * -off, 0.01));
+        // Over stays on the same side of the stumps in world x for both hands.
+        assert.ok(side === 'over' ? path(0).x < 0 : path(0).x > 0);
+      }
+    }
+  }
+});
+
+test('from around the wicket every length and swing still stays on the pitch', () => {
+  for (const off of [-1, 1]) for (const length of ['yorker', 'full', 'good', 'short']) for (const variation of ['stock', 'in', 'out']) {
+    for (let i = 0; i < 40; i++) {
+      const d = prepareDelivery({ line: 'off', length, variation, side: 'around', accuracy: 0.7 }, { bowling: 70 }, createRng(i + 1), { bats: off === -1 ? 'R' : 'L' });
+      if (d.extra === 'wide') continue;
+      const path = deliveryPath(d, off);
+      for (let k = 0; k < 50; k++) assert.ok(Math.abs(path((path.T * k) / 49).x) <= 1.52 + 1e-9);
+    }
+  }
+});

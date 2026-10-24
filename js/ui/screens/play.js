@@ -6,10 +6,10 @@ import {
 } from '../../engine/match.js';
 import {
   SHOTS, SHOT_LABELS, LINES, LENGTHS, LINE_LABELS, LENGTH_LABELS, TIMING_WINDOWS, DEFAULT_AIM, OFFSET_STEP_M,
-  VARIATIONS, lineFromX, lengthFromZ,
+  VARIATIONS, SIDES, lineFromX, lengthFromZ,
 } from '../../engine/outcomes.js';
 import { createScene } from '../scene/scene.js';
-import { attachSwipe, dragToOffset, clampOffset } from '../input/swipe.js';
+import { attachDrag, dragToOffset, clampOffset } from '../input/swipe.js';
 
 const RUN_UP_MS = 1100;
 const PAUSE_AFTER_BALL_MS = 1100;
@@ -92,13 +92,13 @@ export function mount(root, props, navigate) {
   const scene = createScene(pitchWrap);
   // Venue look and ball colour (pink = night), before the first ball.
   scene.setConditions?.({ venueId: state.config.venueId ?? null, ball: state.config.ball ?? 'white' });
-  // Lower half of the delivery view takes drags and swipes (SPEC 12.1).
-  // Positioned through CSSOM so it works under the strict CSP; Joel styles .pl-swipe.
+  // Lower half of the delivery view takes a drag to move the batter (SPEC 12.1,
+  // 15.3). Positioned through CSSOM so it works under the strict CSP; Joel styles .pl-swipe.
   const swipeZone = el('div', 'pl-swipe');
   Object.assign(swipeZone.style, { position: 'absolute', left: '0', right: '0', bottom: '0', height: '50%', touchAction: 'none', zIndex: '3' });
   swipeZone.hidden = true;
   pitchWrap.append(swipeZone);
-  let detachSwipe = () => {};
+  let detachDrag = () => {};
 
   // Joel's shared scoreboard, if it is there; the mini score is the fallback.
   let renderScoreboard = null;
@@ -181,9 +181,10 @@ export function mount(root, props, navigate) {
       batColors: teamByCode(state, inn.battingTeam).colors,
       bowlColors: teamByCode(state, inn.bowlingTeam).colors,
       spinner: bowler?.bowlType === 'spin',
+      // The user's side carries over between balls; the AI's is set in userBats.
+      side: isUserBatting(state) ? 'over' : bowlPick.side,
     });
     scene.setBatter?.({ bats: strikerBats(), offsetX: 0 });
-    scene.showAim?.(null);
     flash.textContent = '';
     flash.className = 'pl-flash';
     speed.textContent = '';
@@ -246,12 +247,13 @@ export function mount(root, props, navigate) {
   }
 
   // User bats: AI bowls. Before release the user can shuffle across the
-  // crease; after it, swipe (or tap a shot button) to play.
-  let loftOn = false;
+  // crease; after it, tap (or key) a shot button to play. Loft is always
+  // in the air (SPEC 15.3).
   function userBats() {
     const bowl = aiBowl(state);
     const delivery = previewDelivery(state, bowl);
     const bats = strikerBats();
+    scene.setBowlingSide?.(delivery.side);
     scene.setMarker(delivery);
     controls.textContent = '';
     controls.className = 'pl-controls pl-shots';
@@ -276,16 +278,8 @@ export function mount(root, props, navigate) {
     const moveRight = button('pl-btn pl-move pl-move-right', '▶', () => step(-1));
     moveLeft.setAttribute('aria-label', 'Move batter left');
     moveRight.setAttribute('aria-label', 'Move batter right');
-    const loftBtn = button('pl-btn pl-loft', 'Aerial', () => {
-      loftOn = !loftOn;
-      loftBtn.setAttribute('aria-pressed', String(loftOn));
-      loftBtn.classList.toggle('pl-picked', loftOn);
-    });
-    loftBtn.setAttribute('aria-pressed', String(loftOn));
-    loftBtn.classList.toggle('pl-picked', loftOn);
-    loftBtn.title = 'When on, every swipe is played in the air';
     const moveRow = el('div', 'pl-move-row');
-    moveRow.append(moveLeft, loftBtn, moveRight);
+    moveRow.append(moveLeft, moveRight);
 
     const buttons = SHOTS.map((shot) => {
       const b = button('pl-btn pl-shot', SHOT_LABELS[shot], () => playShot({ shot, aimDeg: DEFAULT_AIM[shot], aerial: shot === 'loft' }));
@@ -295,28 +289,22 @@ export function mount(root, props, navigate) {
       return b;
     });
     controls.append(moveRow, ...buttons);
-    const hint = el('p', 'pl-hint', 'Move before the ball, then swipe the pitch to hit or tap to defend.');
+    const hint = el('p', 'pl-hint', 'Move before the ball, then tap a shot.');
     controls.append(hint);
 
-    // Swipe zone: lower half of the delivery view.
+    // Drag zone: lower half of the delivery view, only until release.
     let dragFrom = null;
-    const swipe = attachSwipe(swipeZone, {
-      mode: () => (played ? 'off' : releaseAt == null ? 'move' : 'swipe'),
+    const drag = attachDrag(swipeZone, {
+      enabled: () => releaseAt == null && !played,
       onMove: (dx) => {
-        if (releaseAt != null) return;
         dragFrom ??= offsetX;
         setOffset(dragToOffset(dragFrom, dx, bats));
       },
       onMoveEnd: () => (dragFrom = null),
-      onAim: (aim) => scene.showAim?.(aim),
-      onShot: ({ shot, aimDeg, aerial, atMs }) => playShot({ shot, aimDeg, aerial }, atMs),
-      zoneHeight: () => swipeZone.clientHeight,
-      loft: () => loftOn,
-      bats: () => bats,
     });
     swipeZone.hidden = false;
-    detachSwipe = () => {
-      swipe.detach();
+    detachDrag = () => {
+      drag.detach();
       swipeZone.hidden = true;
     };
 
@@ -332,15 +320,14 @@ export function mount(root, props, navigate) {
     function playShot({ shot, aimDeg, aerial }, atMs = performance.now()) {
       if (played || releaseAt == null) return;
       played = true;
-      scene.showAim?.(null);
       scene.swing(shot, { aimDeg, aerial });
       finish({ shot, aimDeg, aerial }, atMs - releaseAt - delivery.travelMs);
     }
     function finish({ shot, aimDeg = 0, aerial = false }, timingMs) {
       played = true;
       setKeyHandler(null);
-      detachSwipe();
-      [moveLeft, moveRight, loftBtn, ...buttons].forEach((b) => (b.disabled = true));
+      detachDrag();
+      [moveLeft, moveRight, ...buttons].forEach((b) => (b.disabled = true));
       buttons.forEach((b) => b.dataset.shot === shot && b.classList.add('pl-picked'));
       const bat = shot === 'leave'
         ? { shot: 'leave', timingMs: null, offsetX }
@@ -364,7 +351,6 @@ export function mount(root, props, navigate) {
       const ifLeft = playBall(state, bowl, { shot: 'leave', timingMs: null, offsetX }).ball;
       scene.release(delivery, { pre: ifLeft });
       later(() => {
-        swipe.flush();
         if (!played) finish({ shot: 'leave' }, null);
       }, delivery.travelMs + TIMING_WINDOWS.edge);
     }, RUN_UP_MS);
@@ -401,10 +387,12 @@ export function mount(root, props, navigate) {
     controls.append(list);
   }
 
-  // User bowls: line, length (or drag the landing ring), a variation, then
-  // stop the power meter. pitch is set only after a drag; a Line/Length tap
-  // clears it so the ring snaps back to the preset.
-  const bowlPick = { line: 'off', length: 'good', pitch: null, variation: 'stock' };
+  // User bowls: over/around the wicket, line, length (or drag the landing
+  // ring), a variation, then stop the power meter. pitch is set only after a
+  // drag; a Line/Length tap clears it so the ring snaps back to the preset.
+  // The side carries over to the next ball (SPEC 15.2).
+  const bowlPick = { side: 'over', line: 'off', length: 'good', pitch: null, variation: 'stock' };
+  const SIDE_LABELS = { over: 'Over', around: 'Around' };
   const VARIATION_LABELS = {
     pace: { stock: 'Stock', in: 'Inswing', out: 'Outswing', slower: 'Slower' },
     spin: { stock: 'Stock', in: 'Turn in', out: 'Turn away', slower: 'Slower' },
@@ -445,7 +433,15 @@ export function mount(root, props, navigate) {
     };
     const bowler = playerById(state, currentInnings(state).bowlerId);
     const variationLabels = VARIATION_LABELS[bowler?.bowlType === 'spin' ? 'spin' : 'pace'];
+    // Over/Around: the bowler, umpire and non-striker move straight away.
+    const sideGroup = group('Side', SIDES, SIDE_LABELS, 'side', () => {
+      scene.setBowlingSide?.(bowlPick.side);
+      commentary.textContent = `${bowler.name} switches to ${bowlPick.side} the wicket.`;
+    });
+    sideGroup.classList.add('pl-side');
+    sideGroup.querySelectorAll('button').forEach((b) => b.classList.add('pl-side-btn'));
     controls.append(
+      sideGroup,
       group('Line', LINES, LINE_LABELS, 'line', snap),
       group('Length', LENGTHS, LENGTH_LABELS, 'length', snap),
       group('Variation', VARIATIONS, variationLabels, 'variation'),
@@ -493,7 +489,7 @@ export function mount(root, props, navigate) {
       bowlBtn.disabled = true;
       controls.querySelectorAll('button').forEach((b) => (b.disabled = true));
       const accuracy = Math.max(0, 1 - Math.abs(pos - 0.5) * 2);
-      const bowl = { line: bowlPick.line, length: bowlPick.length, accuracy: Math.round(accuracy * 100) / 100 };
+      const bowl = { line: bowlPick.line, length: bowlPick.length, accuracy: Math.round(accuracy * 100) / 100, side: bowlPick.side };
       if (bowlPick.pitch) bowl.pitch = bowlPick.pitch;
       if (bowlPick.variation !== 'stock') bowl.variation = bowlPick.variation;
       deliver(bowl);
@@ -551,7 +547,7 @@ export function mount(root, props, navigate) {
     timeouts.clear();
     frames.clear();
     setKeyHandler(null);
-    detachSwipe();
+    detachDrag();
     scene.enableMarkerDrag?.(null);
     scene.destroy();
     root.textContent = '';

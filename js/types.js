@@ -36,6 +36,22 @@
  * @property {number} accuracy      0..1 from the power meter (AI supplies its own)
  * @property {{x:number, z:number}} [pitch]   landing spot; x metres batter-relative (+ = leg side, 0 = middle stump), z metres from the batter's stumps
  * @property {'stock'|'in'|'out'|'slower'} [variation]
+ * @property {'over'|'around'} [side]   bowler's side of the wicket; left out = 'over', played exactly as v1.2
+ */
+
+/** @typedef {Object} Delivery   what prepareDelivery returns; BallResult.delivery
+ * @property {'off'|'middle'|'leg'} line   at the batter, after drift and swing
+ * @property {'yorker'|'full'|'good'|'short'} length
+ * @property {number} kph
+ * @property {number} travelMs
+ * @property {null|'wide'|'noball'} extra   wide only when arrivalX < -0.90 or > +0.45
+ * @property {null|{x:number, z:number}} pitch   landing spot after scatter
+ * @property {'stock'|'in'|'out'|'slower'} variation
+ * @property {number} swingX     metres of swing/turn at the batter, + = toward leg
+ * @property {'over'|'around'} side
+ * @property {number} releaseX   release point across the crease, metres batter-relative
+ * @property {number} arrivalX   where the ball reaches the batting crease, metres batter-relative
+ * @property {null|'in'|'across'} angle   only set when BowlInput.side was given
  */
 
 /** @typedef {Object} BatInput
