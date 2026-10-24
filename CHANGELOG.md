@@ -2,6 +2,10 @@
 
 All notable changes to Stumps Ahead. Versions follow semantic versioning: features bump the minor version, fixes the patch.
 
+## 1.3.1 - 2026-10-24
+
+- The arrival marker at the batter's crease is removed from the play view. Wides are still decided by where the ball reaches the batter; the engine just keeps that to itself.
+
 ## 1.3.0 - 2026-10-24
 
 - Fix: wides are now decided only by where the ball reaches the batter (more than 0.9 m outside off, or past 0.45 m down leg). A ball that reaches the batter on the stumps is never a wide, and the arrival marker shows where it will reach; wayward deliveries can still drift wide.

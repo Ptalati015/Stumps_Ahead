@@ -272,14 +272,6 @@ export function createScene(host) {
   const marker = svg('ellipse', { class: 'sc-marker', fill: 'rgba(255,210,63,0.28)', stroke: '#ffd23f', 'stroke-width': 1.4 }, markerLayer);
   const guardMark = svg('line', { stroke: '#ffd23f', 'stroke-linecap': 'round' }, markerLayer);
   const actorLayer = svg('g', {}, pitchCam);
-  // Where the set-up ball will reach the batter (SPEC 15.1): a post and a
-  // diamond on the popping crease, above the actors so the batter never hides
-  // it. Neutral, or red when that point is past a wide line.
-  const arrivalG = svg('g', { class: 'sc-arrival', visibility: 'hidden', 'pointer-events': 'none' }, pitchCam);
-  const arrivalHalo = svg('line', { 'stroke-linecap': 'round' }, arrivalG);
-  const arrivalPost = svg('line', { 'stroke-linecap': 'round' }, arrivalG);
-  const arrivalTip = svg('polygon', {}, arrivalG);
-  let arrival = null;
   // Night: the edges of the frame fall away into the dark.
   const nightShade = svg('rect', { x: -2000, y: -2000, width: 4400, height: 4400, fill: 'url(#sc-vignette)', 'pointer-events': 'none', visibility: 'hidden' }, pitchCam);
 
@@ -495,7 +487,6 @@ export function createScene(host) {
     batPose = { ...STANCE };
     drawBatter();
     drawGuardMark();
-    drawArrival();
     const idleStart = performance.now();
     track('batter', (now) => {
       // A small tap of the bat while waiting.
@@ -551,32 +542,6 @@ export function createScene(host) {
     const [sx, sy, s] = project(path.bounce.x, 0, path.bounce.z);
     set(marker, { cx: sx, cy: sy, rx: 0.24 * s, ry: 0.09 * s, visibility: 'visible' });
   }
-  /** {x, wide}: x in batter-relative metres (+ toward leg) at the crease; null hides it. */
-  function setArrivalMarker(spot) {
-    arrival = spot && Number.isFinite(spot.x) ? { x: spot.x, wide: !!spot.wide } : null;
-    drawArrival();
-  }
-  function drawArrival() {
-    if (!arrival) {
-      arrivalG.setAttribute('visibility', 'hidden');
-      return;
-    }
-    const wx = arrival.x * -off;
-    const [gx, gy, sc] = project(wx, 0, CREASE_Z);
-    const [, ty] = project(wx, STUMP_H, CREASE_Z);
-    // Light blue, not white, so it stands off the pads and crease lines. The
-    // floors keep it readable at the far end on a phone (~0.66 px per unit).
-    const color = arrival.wide ? '#ff4d4d' : '#9fe0ff';
-    const edge = arrival.wide ? '#5c0a12' : '#0d2f45';
-    const w = Math.max(4.5, 0.1 * sc);
-    const lw = Math.max(1.4, 0.025 * sc);
-    const top = Math.min(ty, gy - 3.2 * w);
-    set(arrivalHalo, { x1: gx, y1: gy, x2: gx, y2: top, stroke: edge, 'stroke-width': lw + 1.2, 'stroke-opacity': 0.55 });
-    set(arrivalPost, { x1: gx, y1: gy, x2: gx, y2: top, stroke: color, 'stroke-width': lw, 'stroke-dasharray': `${Math.max(2.4, 0.06 * sc).toFixed(1)} ${Math.max(1.8, 0.05 * sc).toFixed(1)}` });
-    set(arrivalTip, { points: pts([[gx, gy - w * 0.7], [gx + w, gy], [gx, gy + w * 0.7], [gx - w, gy]]), fill: color, stroke: edge, 'stroke-width': 0.9 });
-    arrivalG.setAttribute('visibility', 'visible');
-  }
-
   function hideMarker() {
     marker.setAttribute('visibility', 'hidden');
   }
@@ -640,7 +605,6 @@ export function createScene(host) {
   function release(delivery, { pre = null, swing = null } = {}) {
     enableMarkerDrag(null);
     hideMarker();
-    setArrivalMarker(null);
     followThrough();
     const path = pathFor(delivery);
     const start = performance.now();
@@ -1182,7 +1146,7 @@ export function createScene(host) {
   }
 
   return {
-    newBall, setMarker, hideMarker, setArrivalMarker, runUp, release, swing: swingBat, outcome, destroy,
+    newBall, setMarker, hideMarker, runUp, release, swing: swingBat, outcome, destroy,
     setCamera, setBatter, setBowlingSide, setConditions, enableMarkerDrag,
   };
 
