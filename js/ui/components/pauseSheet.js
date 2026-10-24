@@ -68,8 +68,12 @@ export function openPauseSheet(root, state, { onResume, onQuit } = {}) {
   );
   const overlay = el('div', { className: 'ps' }, sheet);
 
-  // Escape resumes, and Tab stays inside the sheet while it is open.
+  // The sheet is modal: every key stops here (capture, before the play
+  // screen's handlers), so shortcuts like the shot keys cannot reach the
+  // game while it is open. stopPropagation leaves the buttons' own
+  // Enter/Space activation alone. Escape resumes, and Tab stays inside.
   const onKey = (e) => {
+    e.stopPropagation();
     if (e.key === 'Escape') {
       e.preventDefault();
       close();
