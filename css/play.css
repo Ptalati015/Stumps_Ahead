@@ -383,3 +383,12 @@
 .ps-confirm p { margin: 0; font-weight: 600; }
 .ps-confirm[hidden], .ps-actions[hidden] { display: none; }
 .ps-confirm-quit { background: var(--bad); color: #2a0606; }
+
+/* Shot buttons beside the pad: two columns, with Loft (the last button)
+   spanning both. Owned here so play.js sets no inline styles. */
+.pl-shot-col { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-content: start; }
+.pl-shot-col > :last-child { grid-column: 1 / -1; }
+
+/* Play header: the scoreboard shrinks, the pause button keeps its 44 px. */
+.pl-score { display: flex; align-items: center; gap: 8px; }
+.pl-score-main { flex: 1; min-width: 0; }
