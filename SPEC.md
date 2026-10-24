@@ -435,6 +435,8 @@ Talati's feedback: v1.0.0 is fun. Next, make bowling more customisable without r
   - **Slower:** travel time +25%. For the AI batter it raises the chance of early timing, and for the user it is just later. It also raises the caught weight on Loft.
   - **Effect on the AI batter:** it reads a variation with probability `batting / 140`, and when it reads it there is no extra penalty.
 - **Delivery data for the scene:** `prepareDelivery` returns `pitch` (the actual landing spot after scatter), `variation`, `swingX` (lateral movement in metres between release and arrival) and `travelMs`, so the scene draws exactly what the engine decided.
+- `delivery.pitch` is `null` when the input had no `pitch`, so the scene keeps its Line/Length preset positions.
+- **Scoring balance:** with the AI bowling variations, AI vs AI on Normal averages about 9.7 runs an over (was 10.3), which is still inside the T20 range.
 - **Compatibility:** if `pitch` and `variation` are left out, a fixed seed gives results identical to today.
 - **Tests:** bucket edges; scatter grows as accuracy drops; outswing raises edges and inswing raises bowled/LBW over 2,000 seeded balls; slower adds 25% to travel time; every existing test and the 270-match invariant test still pass.
 
