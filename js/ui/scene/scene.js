@@ -1233,7 +1233,7 @@ function buildDefs(root) {
   const field = radial('sc-field', [0, 1]);
   // Floodlight glow, only drawn at night.
   radial('sc-glow', [0, 0.25, 1]).forEach((st, i) => {
-    set(st, { 'stop-color': '#fff6d8', 'stop-opacity': [0.95, 0.4, 0][i] });
+    set(st, { 'stop-color': '#fff6d8', 'stop-opacity': [1, 0.5, 0][i] });
   });
   radial('sc-vignette', [0.45, 1], { gradientUnits: 'userSpaceOnUse', cx: CX, cy: 134, r: 190 }).forEach((st, i) => {
     set(st, { 'stop-color': '#020814', 'stop-opacity': [0, 0.5][i] });
@@ -1344,6 +1344,14 @@ function drawPitchCamBackground(g) {
     line(-1.32, bz, 1.32, bz);
     line(-1.32, bz - dir * 1.2, -1.32, pz);
     line(1.32, bz - dir * 1.2, 1.32, pz);
+  }
+
+  // Night: a pool of floodlight over the square, the rest of the frame darker.
+  if (look.night) {
+    const [px, py] = project(0, 0, 10.06);
+    const pool = svg('radialGradient', { id: 'sc-pool', gradientUnits: 'userSpaceOnUse', cx: px, cy: py, r: cam.dir < 0 ? 175 : 150, gradientTransform: `translate(${px} ${py}) scale(1 0.8) translate(${-px} ${-py})` }, g);
+    for (const [offset, a] of [[0.35, 0], [0.75, 0.32], [1, 0.55]]) svg('stop', { offset, 'stop-color': '#020a1c', 'stop-opacity': a }, pool);
+    svg('rect', { x: -2000, y: -2000, width: 4400, height: 4400, fill: 'url(#sc-pool)', 'pointer-events': 'none' }, g);
   }
 }
 
