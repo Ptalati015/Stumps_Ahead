@@ -6,6 +6,7 @@
 import { svg, set, pts, lerp, clamp01, easeOut, easeInOut } from './svg.js';
 import { createPerson, createBatter3D, yawLocal } from './figures.js';
 import { getVenue } from '../../data/venues.js';
+import { PITCH_LIMITS } from '../../engine/outcomes.js';
 
 // ---- Pitch cam projection --------------------------------------------------
 // World: x across the pitch (metres, + is the leg side of a right-hander),
@@ -1104,10 +1105,10 @@ export function createScene(host) {
     drawFieldCamBackground(fieldBg);
   }
 
-  // Drag limits, batter-relative metres: across from 1.0 m outside off to
-  // 0.6 m outside leg (0 = middle stump), along 0.5 m to 12 m from the stumps.
-  const DRAG_X = [-1.0, 0.6];
-  const DRAG_Z = [0.5, 12];
+  // Drag limits, batter-relative metres, straight from the engine's
+  // PITCH_LIMITS so the ring can only sit where a ball can actually pitch.
+  const DRAG_X = [PITCH_LIMITS.xMin, PITCH_LIMITS.xMax];
+  const DRAG_Z = [PITCH_LIMITS.zMin, PITCH_LIMITS.zMax];
   let markerDrag = null;
   let dragId = null;
   let dragSpot = null;
