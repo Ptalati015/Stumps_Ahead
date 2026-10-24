@@ -298,3 +298,11 @@ button { font: inherit; color: inherit; }
 .result--win .result__banner .title { color: var(--accent); }
 .result__lines { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 8px; }
 .result__lines li { display: flex; align-items: center; gap: 10px; font-weight: 600; background: var(--panel); border-radius: var(--radius); padding: 8px 12px; }
+
+/* Laptop and desktop: use more of the width instead of a phone column. */
+@media (min-width: 900px) {
+  .app { max-width: 980px; }
+  .nation-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .nation { flex-direction: column; text-align: center; }
+  .squads { grid-template-columns: 1fr 1fr; }
+}
