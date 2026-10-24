@@ -16,6 +16,19 @@ function navigate(screen, props) {
     return;
   }
   root.textContent = '';
+  if (screen === 'menu') {
+    // Quit from the pause sheet lands here (SPEC 16.3); the app shows its menu.
+    const card = document.createElement('div');
+    card.className = 'dev-card';
+    const head = document.createElement('h2');
+    head.textContent = 'Menu (dev harness)';
+    const btn = document.createElement('button');
+    btn.textContent = 'New match';
+    btn.addEventListener('click', () => navigate('play', { match: newMatch() }));
+    card.append(head, btn);
+    root.append(card);
+    return;
+  }
   const card = document.createElement('div');
   card.className = 'dev-card';
   for (const inn of props.match.innings) {
@@ -36,12 +49,17 @@ function navigate(screen, props) {
 }
 
 function newMatch() {
-  return createMatch(fixtureConfig({
+  const config = fixtureConfig({
     overs: Number(q.get('overs')) || 2,
     battingFirst: q.get('bat') === 'ai' ? 'ai' : 'user',
     difficulty: q.get('difficulty') || 'normal',
     seed: q.has('seed') ? Number(q.get('seed')) : undefined,
-  }));
+  });
+  // ?lh=1 makes every fixture player a left-hander, to check mirrored controls.
+  if (q.has('lh')) {
+    for (const team of ['userTeam', 'aiTeam']) config[team] = { ...config[team], players: config[team].players.map((p) => ({ ...p, bats: 'L' })) };
+  }
+  return createMatch(config);
 }
 
 navigate('play', { match: newMatch() });

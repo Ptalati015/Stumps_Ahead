@@ -52,6 +52,8 @@
  * @property {number} releaseX   release point across the crease, metres batter-relative
  * @property {number} arrivalX   where the ball reaches the batting crease, metres batter-relative
  * @property {null|'in'|'across'} angle   only set when BowlInput.side was given
+ * @property {boolean} hattrickBall   the bowler's last two legal balls were both their wickets
+ * @property {string|null} note       situational line for the run-up ("{n} needed off the last over")
  */
 
 /** @typedef {Object} BatInput
@@ -60,6 +62,7 @@
  * @property {number} [offsetX]   metres, -0.6..0.6, + = toward the batter's leg side
  * @property {number} [aimDeg]    intended direction, -180..180, 0 = straight, + = leg side (batter-relative)
  * @property {boolean} [aerial]
+ * @property {'auto'|'pad'} [aimSource]   'pad' clamps aimDeg to the shot's arc and can play against the line; left out = 'auto'
  */
 
 /** @typedef {Object} BallResult
@@ -67,7 +70,9 @@
  * @property {null|{type:'wide'|'noball', runs:number}} extra
  * @property {null|{kind:'bowled'|'caught'|'lbw'|'runout', batterId:string}} wicket
  * @property {'perfect'|'good'|'early'|'late'|'miss'|null} timing
- * @property {string} commentary
+ * @property {string} commentary     the ball's line, plus at most one milestone or situational line
+ * @property {Array<{kind:'fifty'|'hundred'|'threefor'|'fivefor'|'hattrick_ball'|'hattrick'|'maiden'|'partnership50', playerId:string}>} milestones
+ * @property {string|null} note     situational line ("And that wins it!"), else null
  * @property {number|null} angleDeg   final direction, batter-relative, same convention as aimDeg
  * @property {boolean} aerial
  * @property {number|null} carryM     metres in the air (0 for ground shots)

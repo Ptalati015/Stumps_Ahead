@@ -2,13 +2,14 @@
 // Pure: no DOM. Every exported function that changes the match returns a new
 // MatchState and leaves the one passed in untouched. Shapes: js/types.js.
 import { createRng, forkRng } from './rng.js';
-import { prepareDelivery, resolveOutcome, commentaryFor, shotFlight } from './outcomes.js';
+import { prepareDelivery, resolveOutcome, commentaryFor, commentaryLine, shotFlight } from './outcomes.js';
 
 export { aiChooseBowler, aiBowl, aiBat } from './ai.js';
 
 export const BALLS_PER_OVER = 6;
 const SALT_DELIVERY = 0x5eed;
 const SALT_FLIGHT = 0xf117;
+const SALT_COMMENT = 0xc0de;
 
 const clone = (state) => structuredClone(state);
 
@@ -49,6 +50,10 @@ function newInnings(battingTeam, bowlingTeam, target) {
     log: [],
     target,
     extras: { wides: 0, noballs: 0 },
+    // Bookkeeping for milestones and commentary (SPEC 16.2).
+    partnershipStart: 0,
+    overStart: 0,
+    lastLines: {},
   };
 }
 
@@ -102,12 +107,30 @@ export function availableBowlers(state) {
   );
 }
 
-/** Ball speed, travel time and any drift/extra, without advancing the match. */
+/**
+ * Ball speed, travel time and any drift/extra, without advancing the match.
+ * Also says whether the bowler is on a hat-trick and carries a situational
+ * line (the last over of a chase) for the run-up.
+ */
 export function previewDelivery(state, bowl) {
   const inn = currentInnings(state);
   const bowler = playerById(state, inn.bowlerId);
   const batter = playerById(state, inn.strikerId);
-  return prepareDelivery(bowl, bowler, forkRng(state.rngState, SALT_DELIVERY), batter);
+  const delivery = prepareDelivery(bowl, bowler, forkRng(state.rngState, SALT_DELIVERY), batter);
+  delivery.hattrickBall = onHattrick(inn, inn.bowlerId);
+  delivery.note = null;
+  const chase = chaseInfo(state);
+  if (chase && chase.runsNeeded > 0 && inn.legalBalls === totalBalls(state) - BALLS_PER_OVER) {
+    delivery.note = commentaryLine('last_over', { n: chase.runsNeeded }, { pickRng: forkRng(state.rngState, SALT_COMMENT) });
+  }
+  return delivery;
+}
+
+/** The bowler's last two legal balls in this innings were both their wickets. */
+function onHattrick(inn, bowlerId) {
+  if (!bowlerId) return false;
+  const mine = inn.log.filter((b) => b.bowlerId === bowlerId && !b.extra);
+  return mine.length >= 2 && mine.slice(-2).every((b) => b.wicket && b.wicket.kind !== 'runout');
 }
 
 // ---- State transitions ----------------------------------------------------
@@ -138,6 +161,7 @@ export function playBall(state, bowl, bat) {
   const bowler = playerById(next, inn.bowlerId);
   const bowlerCard = inn.bowling[inn.bowlerId];
   const batterCard = inn.batting[inn.strikerId];
+  const before = { batRuns: batterCard.runs, wickets: bowlerCard.wickets, partnership: inn.runs - (inn.partnershipStart ?? 0) };
 
   let outcome = { runs: 0, wicketKind: null, timing: null, shot: bat?.shot ?? 'leave' };
   if (delivery.extra !== 'wide') {
@@ -184,16 +208,48 @@ export function playBall(state, bowl, bat) {
   // A bowler changing sides gets a line of its own (SPEC 15.2).
   const prevSide = inn.log.findLast((b) => b.bowlerId === bowler.id)?.delivery?.side ?? 'over';
   const sideNote = delivery.side !== prevSide ? `${bowler.name} switches to ${delivery.side} the wicket. ` : '';
+  // Lines come from their own stream (SPEC 16.2), so seeds keep their scores.
+  const names = { batter: batter.name, bowler: bowler.name, fielder: fielder.name };
+  const lineOpts = { pickRng: forkRng(state.rngState, SALT_COMMENT), last: (inn.lastLines ??= {}) };
+  const line = commentaryFor(
+    { runs: outcome.runs, extra: delivery.extra, wicketKind: outcome.wicketKind, timing: outcome.timing, shot: outcome.shot, angleDeg: flight.angleDeg },
+    names,
+    rng,
+    lineOpts,
+  );
+
+  // Milestones, each on the ball it happens (SPEC 16.2).
+  const milestones = [];
+  if (delivery.hattrickBall) milestones.push({ kind: 'hattrick_ball', playerId: bowler.id });
+  if (before.batRuns < 50 && batterCard.runs >= 50) milestones.push({ kind: 'fifty', playerId: batter.id });
+  if (before.batRuns < 100 && batterCard.runs >= 100) milestones.push({ kind: 'hundred', playerId: batter.id });
+  if (before.wickets < 3 && bowlerCard.wickets >= 3) milestones.push({ kind: 'threefor', playerId: bowler.id });
+  if (before.wickets < 5 && bowlerCard.wickets >= 5) milestones.push({ kind: 'fivefor', playerId: bowler.id });
+  if (delivery.hattrickBall && legal && wicket && wicket.kind !== 'runout') milestones.push({ kind: 'hattrick', playerId: bowler.id });
+  const partnership = inn.runs - (inn.partnershipStart ?? 0);
+  if (before.partnership < 50 && partnership >= 50) milestones.push({ kind: 'partnership50', playerId: batter.id });
+  if (wicket) inn.partnershipStart = inn.runs;
+  const overEnds = legal && inn.legalBalls % BALLS_PER_OVER === 0;
+  const overBalls = inn.log.slice(inn.overStart ?? 0);
+  if (overEnds && [...overBalls, { runs: outcome.runs, extra: delivery.extra }].every((b) => b.runs === 0 && !b.extra)) {
+    milestones.push({ kind: 'maiden', playerId: bowler.id });
+  }
+  if (overEnds) inn.overStart = inn.log.length + 1;
+  const wonIt = inn.target != null && inn.runs >= inn.target;
+  const fill = { ...names, n: milestoneNumber(milestones, batterCard, bowlerCard, partnership) };
+  // One extra line at most: the winning runs, else the biggest milestone.
+  const said = wonIt ? 'won_it' : MILESTONE_ORDER.find((k) => milestones.some((m) => m.kind === k)) ?? null;
+  const note = wonIt ? commentaryLine('won_it', fill, lineOpts) : null;
+  const extraLine = said === 'won_it' ? note : said ? commentaryLine(said, fill, lineOpts) : null;
+
   const ball = {
     runs: outcome.runs,
     extra: delivery.extra ? { type: delivery.extra, runs: 1 } : null,
     wicket,
     timing: outcome.timing,
-    commentary: sideNote + commentaryFor(
-      { runs: outcome.runs, extra: delivery.extra, wicketKind: outcome.wicketKind, timing: outcome.timing, shot: outcome.shot, angleDeg: flight.angleDeg },
-      { batter: batter.name, bowler: bowler.name, fielder: fielder.name },
-      rng,
-    ),
+    commentary: sideNote + line + (extraLine ? ` ${extraLine}` : ''),
+    milestones,
+    note,
     ...flight,
     // Extra fields for the play screen.
     shot: outcome.shot,
@@ -239,6 +295,18 @@ export function startSecondInnings(state) {
   next.lastBowlerId = null;
   next.status = 'awaiting_bowler';
   return next;
+}
+
+// Milestone lines in the order they are worth saying; hattrick_ball is said
+// during the run-up (delivery.hattrickBall), not after the ball.
+const MILESTONE_ORDER = ['hattrick', 'hundred', 'fifty', 'fivefor', 'threefor', 'partnership50', 'maiden'];
+
+function milestoneNumber(milestones, batterCard, bowlerCard, partnership) {
+  const kind = MILESTONE_ORDER.find((k) => milestones.some((m) => m.kind === k));
+  if (kind === 'fifty' || kind === 'hundred') return batterCard.runs;
+  if (kind === 'threefor' || kind === 'fivefor') return bowlerCard.wickets;
+  if (kind === 'partnership50') return partnership;
+  return null;
 }
 
 function swapStrike(inn) {

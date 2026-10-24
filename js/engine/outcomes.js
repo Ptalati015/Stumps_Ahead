@@ -1,6 +1,7 @@
 // Ball outcomes: timing grade, delivery preparation and the outcome table.
 // Pure: no DOM, randomness only through an rng from rng.js.
 import { clamp } from './rng.js';
+import { COMMENTARY } from '../data/commentary.js';
 
 export const SHOTS = ['defend', 'drive', 'pull', 'cut', 'loft'];
 export const SHOT_LABELS = { defend: 'Defend', drive: 'Drive', pull: 'Pull', cut: 'Cut', loft: 'Loft', leave: 'Leave' };
@@ -316,7 +317,12 @@ export function resolveOutcome({ delivery, bat, batter, bowler, difficulty, user
 
   const timing = gradeTiming(bat.timingMs);
   const line = effectiveLine(delivery.line, offsetX);
-  const row = TABLE[shot][timing === 'early' || timing === 'late' ? 'edge' : timing];
+  let row = TABLE[shot][timing === 'early' || timing === 'late' ? 'edge' : timing];
+  // Direction pad (SPEC 16.1): aiming against the line of the ball moves 10%
+  // of a perfect/good shot's weight to edges. An Auto shot never pays this.
+  if (bat.aimSource === 'pad' && (timing === 'perfect' || timing === 'good') && againstLine(clampAim(shot, bat.aimDeg), line)) {
+    row = blendRows(row, TABLE[shot].edge, AGAINST_LINE_SHIFT);
+  }
   const [lenScore, lenOut] = LENGTH_FIT[delivery.length]?.[shot] ?? [1, 1];
   const [lineScore, lineOut] = LINE_FIT[line]?.[shot] ?? [1, 1];
   const skill = (clamp(batter?.batting ?? 50, 1, 100) - clamp(bowler?.bowling ?? 50, 1, 100)) / 100;
@@ -358,6 +364,32 @@ export function resolveOutcome({ delivery, bat, batter, bowler, difficulty, user
   // Rare run out going for a quick single.
   if (runs === 1 && rng.next() < 0.015) return { runs: 0, wicketKind: 'runout', timing, shot };
   return { runs, wicketKind: null, timing, shot };
+}
+
+// ---- Direction pad (SPEC 16.1) ----
+// Each shot can only go where that shot goes: the pad's angle is clamped
+// (linearly) to the shot's arc, batter-relative degrees.
+export const SHOT_ARC = { defend: [-30, 30], drive: [-70, 60], cut: [-150, -40], pull: [40, 160], loft: [-90, 90] };
+export const PAD_SECTORS = {
+  straight: 0, midwicket: 45, squareleg: 90, fineleg: 145, cover: -45, point: -90, thirdman: -145,
+};
+const AGAINST_LINE_SHIFT = 0.1;
+
+export function clampAim(shot, aimDeg) {
+  const arc = SHOT_ARC[shot];
+  const aim = Number.isFinite(aimDeg) ? aimDeg : DEFAULT_AIM[shot] ?? 0;
+  return arc ? clamp(aim, arc[0], arc[1]) : aim;
+}
+
+/** Leg side (past +30) at a ball on an off line, or off side (past -30) at one on a leg line. */
+export const againstLine = (aimDeg, line) => (aimDeg > 30 && line === 'off') || (aimDeg < -30 && line === 'leg');
+
+function blendRows(row, edgeRow, share) {
+  const out = {};
+  for (const key of new Set([...Object.keys(row), ...Object.keys(edgeRow)])) {
+    out[key] = (row[key] ?? 0) * (1 - share) + (edgeRow[key] ?? 0) * share;
+  }
+  return out;
 }
 
 // ---- Shot direction and flight (SPEC 12.1, 12.2) ----
@@ -406,7 +438,7 @@ export function shotFlight({ outcome, bat, extra }, rng) {
   // A clean miss that didn't get out: no contact.
   if (timing === 'miss' && !wicketKind) return none;
 
-  const aim = Number.isFinite(bat?.aimDeg) ? normAngle(bat.aimDeg) : DEFAULT_AIM[shot] ?? 0;
+  const aim = bat?.aimSource === 'pad' ? clampAim(shot, bat.aimDeg) : Number.isFinite(bat?.aimDeg) ? normAngle(bat.aimDeg) : DEFAULT_AIM[shot] ?? 0;
   let angle;
   if (timing === 'miss') {
     // A thin edge behind: keeper or slips (off side behind square).
@@ -453,8 +485,72 @@ const SHOT_WORDS = {
   loft: ['a lofted hit', 'a big swing'],
 };
 
-/** Commentary line for a ball. Names are plain strings; UI must render with textContent. */
-// Drive wording follows where the ball actually went (batter-relative angle).
+/**
+ * Field area for a batter-relative angle, for the {where} placeholder.
+ * @returns {string} e.g. "to cover"
+ */
+export function whereWords(angleDeg) {
+  if (angleDeg == null || !Number.isFinite(angleDeg)) return 'back to the bowler';
+  const a = normAngle(angleDeg);
+  if (a >= -15 && a <= 15) return 'straight down the ground';
+  if (a < -15 && a >= -60) return 'to cover';
+  if (a < -60 && a >= -110) return 'to point';
+  if (a < -110) return 'to third man';
+  if (a <= 60) return 'to mid-wicket';
+  if (a <= 110) return 'to square leg';
+  return 'to fine leg';
+}
+
+/** Which COMMENTARY key a ball's outcome uses. */
+export function commentaryKey({ runs, extra, wicketKind, timing, shot, angleDeg = null }) {
+  if (extra === 'wide') return 'wide';
+  if (wicketKind === 'caught') return angleDeg != null && angleDeg < -120 ? 'caught_behind' : 'caught';
+  if (wicketKind) return wicketKind;
+  if (shot === 'leave') return 'leave';
+  if (timing === 'miss') return 'beaten';
+  if (runs === 0) return shot === 'defend' ? 'dot_defend' : 'dot_fielded';
+  if (runs === 1) return 'single';
+  if (runs === 2) return 'two';
+  if (runs === 4) return 'four';
+  if (runs === 6) return 'six';
+  return 'three';
+}
+
+const fillTemplate = (tpl, fill) => tpl.replace(/\{(\w+)\}/g, (m, key) => (fill[key] == null ? m : String(fill[key])));
+
+/**
+ * One line for a COMMENTARY key, filled in. opts.pickRng (the comment
+ * stream) chooses the line; opts.last (per innings, mutated) stops the same
+ * line being used twice in a row for a key; opts.lines overrides the data.
+ */
+export function commentaryLine(key, fill, opts = {}) {
+  const lines = opts.lines ?? COMMENTARY;
+  const arr = Array.isArray(lines[key]) && lines[key].length ? lines[key] : [key];
+  const last = opts.last ?? {};
+  let i = opts.pickRng ? opts.pickRng.int(0, arr.length - 1) : ((last[key] ?? -1) + 1) % arr.length;
+  if (arr.length > 1 && i === last[key]) i = (i + 1) % arr.length;
+  last[key] = i;
+  return fillTemplate(arr[i], fill);
+}
+
+/**
+ * Commentary line for a ball. Names are plain strings; UI must render with
+ * textContent. The draw on the match rng is the same as before SPEC 16, so
+ * scores never depend on the wording; the line itself comes from opts.pickRng.
+ */
+export function commentaryFor({ runs, extra, wicketKind, timing, shot, angleDeg = null }, names, rng, opts = {}) {
+  const { batter = 'The batter', bowler = 'the bowler', fielder = 'the fielder' } = names ?? {};
+  let how = 'a shot';
+  if (extra !== 'wide' && !wicketKind && shot !== 'leave') {
+    // Always draw, so the match rng stream is the same whatever the wording.
+    const picked = rng.pick(SHOT_WORDS[shot] ?? ['a shot']);
+    how = (shot === 'drive' && driveWords(angleDeg)) || picked;
+  }
+  const fill = { batter, bowler, fielder, how, where: whereWords(angleDeg), n: runs };
+  const key = commentaryKey({ runs, extra, wicketKind, timing, shot, angleDeg });
+  const text = commentaryLine(key, fill, opts);
+  return extra === 'noball' ? `${commentaryLine('noball', fill, opts)} ${text}` : text;
+}
 function driveWords(angleDeg) {
   if (angleDeg == null) return null;
   if (angleDeg >= -15 && angleDeg <= 15) return 'a crisp straight drive';
@@ -462,29 +558,4 @@ function driveWords(angleDeg) {
   if (angleDeg < -60) return 'a punchy square drive';
   if (angleDeg <= 45) return 'a lovely on drive';
   return 'a flick off the pads';
-}
-
-export function commentaryFor({ runs, extra, wicketKind, timing, shot, angleDeg = null }, names, rng) {
-  const { batter = 'The batter', bowler = 'the bowler', fielder = 'the fielder' } = names ?? {};
-  if (extra === 'wide') return `Wide from ${bowler}.`;
-  const prefix = extra === 'noball' ? 'No ball! ' : '';
-  if (wicketKind) {
-    const lines = {
-      bowled: `BOWLED! ${bowler} knocks over ${batter}.`,
-      caught: `OUT! ${batter} is caught by ${fielder}.`,
-      lbw: `OUT! ${batter} trapped LBW by ${bowler}.`,
-      runout: `RUN OUT! ${batter} is short of the crease.`,
-    };
-    return lines[wicketKind];
-  }
-  if (shot === 'leave') return `${prefix}${batter} leaves it alone.`;
-  // Always draw, so the match rng stream is the same whatever the wording.
-  const picked = rng.pick(SHOT_WORDS[shot] ?? ['a shot']);
-  const how = (shot === 'drive' && driveWords(angleDeg)) || picked;
-  const timingNote = timing === 'early' ? ' Through early.' : timing === 'late' ? ' A touch late.' : timing === 'miss' ? ' Beaten!' : '';
-  if (runs === 6) return `${prefix}SIX! ${batter} with ${how}, into the stands!`;
-  if (runs === 4) return `${prefix}FOUR! ${how[0].toUpperCase() + how.slice(1)} from ${batter}.`;
-  if (runs === 0) return `${prefix}${timing === 'miss' ? 'Beaten!' : 'Dot ball.'}${timing === 'miss' ? '' : timingNote}`;
-  const word = runs === 1 ? 'a single' : runs === 2 ? 'two runs' : `${runs} runs`;
-  return `${prefix}${batter} plays ${how} for ${word}.${timingNote}`;
 }
