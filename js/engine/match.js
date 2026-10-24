@@ -104,8 +104,10 @@ export function availableBowlers(state) {
 
 /** Ball speed, travel time and any drift/extra, without advancing the match. */
 export function previewDelivery(state, bowl) {
-  const bowler = playerById(state, currentInnings(state).bowlerId);
-  return prepareDelivery(bowl, bowler, forkRng(state.rngState, SALT_DELIVERY));
+  const inn = currentInnings(state);
+  const bowler = playerById(state, inn.bowlerId);
+  const batter = playerById(state, inn.strikerId);
+  return prepareDelivery(bowl, bowler, forkRng(state.rngState, SALT_DELIVERY), batter);
 }
 
 // ---- State transitions ----------------------------------------------------
@@ -179,12 +181,15 @@ export function playBall(state, bowl, bat) {
   // Where the ball went, for the scene (SPEC 12.2). Its own rng stream, so
   // it never changes the score.
   const flight = shotFlight({ outcome, bat, extra: delivery.extra }, forkRng(state.rngState, SALT_FLIGHT));
+  // A bowler changing sides gets a line of its own (SPEC 15.2).
+  const prevSide = inn.log.findLast((b) => b.bowlerId === bowler.id)?.delivery?.side ?? 'over';
+  const sideNote = delivery.side !== prevSide ? `${bowler.name} switches to ${delivery.side} the wicket. ` : '';
   const ball = {
     runs: outcome.runs,
     extra: delivery.extra ? { type: delivery.extra, runs: 1 } : null,
     wicket,
     timing: outcome.timing,
-    commentary: commentaryFor(
+    commentary: sideNote + commentaryFor(
       { runs: outcome.runs, extra: delivery.extra, wicketKind: outcome.wicketKind, timing: outcome.timing, shot: outcome.shot, angleDeg: flight.angleDeg },
       { batter: batter.name, bowler: bowler.name, fielder: fielder.name },
       rng,

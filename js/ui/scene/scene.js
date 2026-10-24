@@ -180,19 +180,24 @@ function arriveHeight(zb) {
  * metres between release and arrival) moves the ball: in the air for pace
  * (swing, a late curve onto the landing spot, then straight), after the
  * bounce for spin (turn). Slower balls just have a longer travelMs.
+ * delivery.releaseX and delivery.arrivalX (SPEC 15) move the release point
+ * and a button delivery's arrival; without them the v1.2 positions are used.
  * The ball stays on the pitch unless the engine called a wide.
  */
 export function deliveryPath(delivery, off = -1) {
   const T = delivery.travelMs / 1000;
   const pitch = delivery.pitch && Number.isFinite(delivery.pitch.x) && Number.isFinite(delivery.pitch.z) ? delivery.pitch : null;
-  const zb = pitch ? pitch.z : BOUNCE_Z[delivery.length] ?? BOUNCE_Z.good;
+  // The bounce stays between the crease and the release, so tb and tA are
+  // never zero whatever the spot.
+  const zb = Math.min(RELEASE.z - 1, Math.max(CREASE_Z + 0.25, pitch ? pitch.z : BOUNCE_Z[delivery.length] ?? BOUNCE_Z.good));
   const hA = pitch ? arriveHeight(zb) : ARRIVE_H[delivery.length] ?? ARRIVE_H.good;
   const vz = (RELEASE.z - CREASE_Z) / T;
   const tb = (RELEASE.z - zb) / vz;
   const tA = T - tb;
   const vUp = (hA + 4.9 * tA * tA) / tA;
   const sw = (Number(delivery.swingX) || 0) * -off;
-  const X0 = RELEASE.x;
+  // releaseX (batter-relative) comes from over/around the wicket (SPEC 15.2).
+  const X0 = Number.isFinite(delivery.releaseX) ? delivery.releaseX * -off : RELEASE.x;
   const edge = delivery.extra === 'wide' ? Infinity : PITCH_HALF_W;
   const keepOn = (x) => Math.max(-edge, Math.min(edge, x));
   let xp;
@@ -202,8 +207,9 @@ export function deliveryPath(delivery, off = -1) {
     xp = pitch.x * -off;
     xA = X0 + ((xp - X0) * T) / tb + sw;
   } else {
-    // The preset line is where the ball ends up after any movement.
-    xA = lineX(delivery, off);
+    // The preset line (or the engine's arrival point, which includes its
+    // scatter) is where the ball ends up after any movement.
+    xA = Number.isFinite(delivery.arrivalX) ? delivery.arrivalX * -off : lineX(delivery, off);
     xp = lerp(X0, xA - sw, tb / T);
   }
   xA = keepOn(xA);
