@@ -214,3 +214,116 @@ test('scoring feels like T20 at normal difficulty (about 7 to 12 an over)', () =
   const rpo = (runs * 6) / balls;
   assert.ok(rpo > 7 && rpo < 12, `rpo ${rpo}`);
 });
+
+// ---- Phase 3: movement, aim and flight (SPEC 12.2) ----
+import { ROPE_M, ANGLE_ERROR, DEFAULT_AIM, effectiveLine, shotFromAim, resolveOutcome } from '../js/engine/outcomes.js';
+
+const SHOT_CYCLE = ['defend', 'drive', 'pull', 'cut', 'loft', 'leave'];
+
+// Play a match with a fixed sequence of BatInputs; `extra(i)` adds fields.
+function scriptedMatch(extra = () => ({})) {
+  let s = createMatch(fixtureConfig({ overs: 5, seed: 2024 }));
+  const out = [];
+  let i = 0;
+  while (s.status !== 'complete') {
+    if (s.status === 'innings_break') { s = startSecondInnings(s); continue; }
+    if (s.status === 'awaiting_bowler') { s = setBowler(s, aiChooseBowler(s)); continue; }
+    const shot = SHOT_CYCLE[i % 6];
+    const bat = shot === 'leave' ? { shot, timingMs: null } : { shot, timingMs: ((i * 37) % 400) - 200 };
+    const r = playBall(s, aiBowl(s), { ...bat, ...extra(i) });
+    s = r.state;
+    i++;
+    out.push(`${r.ball.runs}${r.ball.extra ? r.ball.extra.type[0] : ''}${r.ball.wicket ? 'W' : ''}`);
+  }
+  return `${out.join(' ')} | ${s.result.text}`;
+}
+
+test('leaving the new BatInput fields out scores exactly as before phase 3', () => {
+  // Captured from the engine at 55f0fe5, before offsetX/aimDeg/aerial existed.
+  const before = '1 1 2 4 6 0 1 6 1 0 0W 0 0 4 2 4 6 0 2 4 4 0 0W 0 0 2 4 2 6 0 0 2 1 0W 6 0 0 4 2 2 1 0W 0 0 1 4 6 0 0 1 0W 1 0w 0 0 1 1 2 4 0 0 | India won by 22 runs';
+  assert.equal(scriptedMatch(), before);
+  // Aim and aerial only change where the ball goes, never the score.
+  assert.equal(scriptedMatch((i) => ({ offsetX: 0, aimDeg: (i * 53) % 360 - 180, aerial: i % 2 === 0 })), before);
+});
+
+test('every six is in the air and carries the rope; every four reaches it', () => {
+  let sixes = 0;
+  for (let seed = 1; seed <= 60; seed++) {
+    for (const inn of simulateMatch(fixtureConfig({ overs: 5, seed })).innings) {
+      for (const b of inn.log) {
+        if (b.runs === 6) {
+          sixes++;
+          assert.equal(b.aerial, true);
+          assert.ok(b.carryM >= ROPE_M);
+        }
+        if (b.runs === 4) assert.ok(b.distanceM >= ROPE_M);
+        if (b.wicket?.kind === 'caught') assert.ok(b.aerial && b.carryM > 0 && b.carryM === b.distanceM);
+        if (b.extra?.type === 'wide' || b.wicket?.kind === 'bowled') assert.equal(b.angleDeg, null);
+      }
+    }
+  }
+  assert.ok(sixes > 20);
+});
+
+test('angleDeg stays within the timing error band around the aim', () => {
+  const s = started();
+  let checked = 0;
+  for (let seed = 0; seed < 600; seed++) {
+    const aimDeg = (seed * 29) % 200 - 100;
+    const timingMs = (seed * 13) % 500 - 250; // perfect to early/late, no misses
+    const { ball } = playBall({ ...s, rngState: seed }, { line: 'off', length: 'good', accuracy: 1 }, { shot: shotFromAim(aimDeg, false), timingMs, aimDeg });
+    if (ball.angleDeg == null || ball.wicket) continue;
+    const band = ANGLE_ERROR[ball.timing];
+    if (!band) continue;
+    let d = ball.angleDeg - aimDeg;
+    d = ((d + 540) % 360) - 180;
+    assert.ok(d >= band[0] - 1 && d <= band[1] + 1, `${ball.timing} aim ${aimDeg} got ${ball.angleDeg}`);
+    checked++;
+  }
+  assert.ok(checked > 300);
+});
+
+test('shot buttons use their default directions', () => {
+  const s = started();
+  const { ball } = findBall(s, (r) => r.ball.timing === 'perfect' && !r.ball.wicket && !r.ball.extra, { shot: 'pull', timingMs: 0 });
+  assert.ok(Math.abs(ball.angleDeg - DEFAULT_AIM.pull) <= 5);
+});
+
+test('moving across the crease shifts the line the batter sees', () => {
+  assert.equal(effectiveLine('off', 0), 'off');
+  assert.equal(effectiveLine('off', -0.3), 'middle');
+  assert.equal(effectiveLine('middle', -0.45), 'leg');
+  assert.equal(effectiveLine('middle', 0.3), 'off');
+  assert.equal(effectiveLine('leg', 0.6), 'middle');
+  assert.equal(effectiveLine('off', 0.6), 'off');
+});
+
+test('a batter moved to the leg side is bowled more often by a straight ball', () => {
+  const bowledRate = (offsetX, bat) => {
+    let n = 0;
+    const rng = createRng(77);
+    for (let i = 0; i < 2000; i++) {
+      const r = resolveOutcome({
+        delivery: { line: 'middle', length: 'good' },
+        bat: { ...bat, offsetX },
+        batter: { batting: 60 }, bowler: { bowling: 70 }, difficulty: 'normal', userBatting: true, rng,
+      });
+      if (r.wicketKind === 'bowled' || r.wicketKind === 'lbw') n++;
+    }
+    return n / 2000;
+  };
+  for (const bat of [{ shot: 'leave', timingMs: null }, { shot: 'drive', timingMs: 400 }]) {
+    const guard = bowledRate(0, bat);
+    const exposed = bowledRate(0.45, bat);
+    assert.ok(exposed > guard * 1.5, `${bat.shot}: ${guard} -> ${exposed}`);
+  }
+});
+
+test('drive commentary follows where the ball went', () => {
+  const s = started();
+  const words = { 0: 'straight drive', [-40]: 'cover drive', 30: 'on drive' };
+  for (const [aim, word] of Object.entries(words)) {
+    const { ball } = findBall(s, (r) => r.ball.runs === 4 && r.ball.timing === 'perfect' && !r.ball.extra, { shot: 'drive', timingMs: 0, aimDeg: Number(aim) });
+    assert.match(ball.commentary, new RegExp(word, 'i'));
+  }
+});

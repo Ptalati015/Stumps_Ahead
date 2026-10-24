@@ -2,7 +2,7 @@
 // choices come from a stream forked off the match's rng state, so calling a
 // helper twice on the same state gives the same answer.
 import { clamp, forkRng } from './rng.js';
-import { difficultyFactor } from './outcomes.js';
+import { difficultyFactor, DEFAULT_AIM } from './outcomes.js';
 import {
   availableBowlers, chaseInfo, currentInnings, playerById,
   previewDelivery, teamByCode, totalBalls, BALLS_PER_OVER,
@@ -85,11 +85,20 @@ export function aiBat(state, bowl) {
   weights.loft *= 0.4 + agg * 1.6;
   weights.pull *= 0.7 + agg * 0.6;
   const shot = rng.weighted(weights);
-  if (shot === 'leave') return { shot, timingMs: null };
+  if (shot === 'leave') return { shot, timingMs: null, offsetX: 0, aimDeg: 0, aerial: false };
 
   // When the AI bats, a harder game means better timing.
   const diff = difficultyFactor(state.config.difficulty);
   const skill = clamp(batter?.batting ?? 50, 1, 100);
   const spread = (260 - skill * 1.3) * (1 - diff * 0.15);
-  return { shot, timingMs: Math.round(rng.normal() * spread) };
+  const timingMs = Math.round(rng.normal() * spread);
+
+  // Same fields a human swipe fills (SPEC 12.2), so the scene shows AI shots
+  // the same way. Occasionally shuffle: across to drive, or away to free the arms.
+  const aimDeg = Math.round(DEFAULT_AIM[shot] + rng.normal() * 25);
+  const move = rng.next();
+  let offsetX = 0;
+  if (move < 0.1 && shot === 'drive') offsetX = -0.15;
+  else if (move > 0.93 && (shot === 'loft' || shot === 'cut')) offsetX = 0.15;
+  return { shot, timingMs, offsetX, aimDeg, aerial: shot === 'loft' };
 }

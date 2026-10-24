@@ -36,6 +36,9 @@
 /** @typedef {Object} BatInput
  * @property {'defend'|'drive'|'pull'|'cut'|'loft'|'leave'} shot
  * @property {number|null} timingMs  tap time minus arrival time; null for leave/miss
+ * @property {number} [offsetX]   metres, -0.6..0.6, + = toward the batter's leg side
+ * @property {number} [aimDeg]    intended direction, -180..180, 0 = straight, + = leg side (batter-relative)
+ * @property {boolean} [aerial]
  */
 
 /** @typedef {Object} BallResult
@@ -44,6 +47,10 @@
  * @property {null|{kind:'bowled'|'caught'|'lbw'|'runout', batterId:string}} wicket
  * @property {'perfect'|'good'|'early'|'late'|'miss'|null} timing
  * @property {string} commentary
+ * @property {number|null} angleDeg   final direction, batter-relative, same convention as aimDeg
+ * @property {boolean} aerial
+ * @property {number|null} carryM     metres in the air (0 for ground shots)
+ * @property {number|null} distanceM  total distance; >= rope for a four, carryM >= rope for a six
  */
 
 /** @typedef {Object} BatterCard  @property {number} runs @property {number} balls @property {number} fours @property {number} sixes @property {string|null} howOut */

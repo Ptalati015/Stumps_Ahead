@@ -126,11 +126,32 @@ const WICKET_KINDS = {
 // Chance of losing the stumps when leaving, by line (short balls rarely hit).
 const LEAVE_OUT = { off: 0.03, middle: 0.2, leg: 0.1 };
 
+// ---- Batter movement (SPEC 12.2) ----
+// offsetX is in metres, + toward the batter's leg side. Batter-relative, so
+// the same for right- and left-handers.
+export const MAX_OFFSET_M = 0.6;
+export const OFFSET_STEP_M = 0.15;
+const LINE_SHIFT_M = 0.3;
+
+const offsetOf = (bat) => clamp(Number.isFinite(bat?.offsetX) ? bat.offsetX : 0, -MAX_OFFSET_M, MAX_OFFSET_M);
+
+/** The line as the batter meets it after moving: stepping across to the off side turns off into middle, middle into leg. */
+export function effectiveLine(line, offsetX = 0) {
+  const steps = offsetX <= -LINE_SHIFT_M ? 1 : offsetX >= LINE_SHIFT_M ? -1 : 0;
+  const i = LINES.indexOf(line);
+  return i < 0 ? line : LINES[clamp(i + steps, 0, LINES.length - 1)];
+}
+
+// How much more of the stumps a leg-side shuffle exposes (1 = normal guard).
+const stumpExposure = (offsetX) => 1 + Math.max(0, offsetX) * 2.5;
+// A straight ball with the batter well outside leg is heading for the stumps.
+const aimedAtStumps = (line, offsetX) => offsetX >= 0.45 && (line === 'off' || line === 'middle');
+
 /**
  * Resolve a (non-wide) delivery against the batter's shot.
  * @param {Object} p
  * @param {{line:string, length:string}} p.delivery
- * @param {{shot:string, timingMs:number|null}} p.bat
+ * @param {{shot:string, timingMs:number|null, offsetX?:number}} p.bat
  * @param {Object} p.batter  Player
  * @param {Object} p.bowler  Player
  * @param {'easy'|'normal'|'hard'} p.difficulty
@@ -142,20 +163,25 @@ export function resolveOutcome({ delivery, bat, batter, bowler, difficulty, user
   // Positive when the game should favour the user: easy helps, hard hurts.
   const userEdge = userBatting ? -diff : diff;
   const shot = SHOTS.includes(bat?.shot) ? bat.shot : 'leave';
+  const offsetX = offsetOf(bat);
+  const exposure = stumpExposure(offsetX);
 
   if (shot === 'leave') {
-    const chance = LEAVE_OUT[delivery.line] * (delivery.length === 'short' ? 0.2 : 1);
+    let chance = LEAVE_OUT[delivery.line] * (delivery.length === 'short' ? 0.2 : 1) * exposure;
+    if (aimedAtStumps(delivery.line, offsetX) && delivery.length !== 'short') chance = Math.max(chance, 0.3);
     const out = rng.next() < chance;
     return { runs: 0, wicketKind: out ? rng.weighted(WICKET_KINDS.leave) : null, timing: null, shot };
   }
 
   const timing = gradeTiming(bat.timingMs);
+  const line = effectiveLine(delivery.line, offsetX);
   const row = TABLE[shot][timing === 'early' || timing === 'late' ? 'edge' : timing];
   const [lenScore, lenOut] = LENGTH_FIT[delivery.length]?.[shot] ?? [1, 1];
-  const [lineScore, lineOut] = LINE_FIT[delivery.line]?.[shot] ?? [1, 1];
+  const [lineScore, lineOut] = LINE_FIT[line]?.[shot] ?? [1, 1];
   const skill = (clamp(batter?.batting ?? 50, 1, 100) - clamp(bowler?.bowling ?? 50, 1, 100)) / 100;
   const scoreMul = lenScore * lineScore * (1 + 0.5 * skill) * (1 + 0.12 * userEdge);
-  const outMul = lenOut * lineOut * (1 - 0.6 * skill) * (1 - 0.2 * userEdge);
+  let outMul = lenOut * lineOut * (1 - 0.6 * skill) * (1 - 0.2 * userEdge);
+  if (timing === 'miss') outMul *= exposure;
 
   const weights = {};
   for (const [key, w] of Object.entries(row)) {
@@ -164,12 +190,102 @@ export function resolveOutcome({ delivery, bat, batter, bowler, difficulty, user
     else weights[key] = w * scoreMul;
   }
   const pick = rng.weighted(weights);
-  if (pick === 'out') return { runs: 0, wicketKind: rng.weighted(WICKET_KINDS[shot]), timing, shot };
+  if (pick === 'out') {
+    let kinds = WICKET_KINDS[shot];
+    // Missing with the stumps exposed: more likely to be bowled.
+    if (timing === 'miss' && exposure > 1) kinds = { ...kinds, bowled: (kinds.bowled ?? 0) + 60 * (exposure - 1) };
+    return { runs: 0, wicketKind: rng.weighted(kinds), timing, shot };
+  }
 
   const runs = Number(pick);
   // Rare run out going for a quick single.
   if (runs === 1 && rng.next() < 0.015) return { runs: 0, wicketKind: 'runout', timing, shot };
   return { runs, wicketKind: null, timing, shot };
+}
+
+// ---- Shot direction and flight (SPEC 12.1, 12.2) ----
+// Angles are batter-relative degrees: 0 = straight back past the bowler,
+// + = leg side, - = off side, ±180 = straight behind.
+
+// Default direction for each shot button.
+export const DEFAULT_AIM = { defend: 0, drive: -20, cut: -85, pull: 80, loft: 0, leave: 0 };
+
+/** Shot type from an aim angle and aerial flag (SPEC 12.1 table). */
+export function shotFromAim(aimDeg, aerial) {
+  if (aerial) return 'loft';
+  const a = normAngle(aimDeg);
+  if (a >= -30 && a <= 30) return 'drive';
+  if (a < -30 && a >= -110) return a < -70 ? 'cut' : 'drive';
+  if (a > 30 && a <= 110) return 'pull';
+  return a < 0 ? 'cut' : 'pull';
+}
+
+export function normAngle(deg) {
+  let a = ((Number(deg) || 0) % 360 + 360) % 360;
+  if (a > 180) a -= 360;
+  return a;
+}
+
+// Boundary distance in metres. Joel's scene scales this to its field.
+export const ROPE_M = 65;
+
+/** Angle error band for a timing grade: [min, max] added to the aim. */
+export const ANGLE_ERROR = {
+  perfect: [-5, 5],
+  good: [-12, 12],
+  early: [25, 40],
+  late: [-40, -25],
+};
+
+/**
+ * Where the ball goes, so the scene can draw what the engine decided.
+ * Uses its own rng stream: leaving it out of a match never changes scores.
+ * @returns {{angleDeg:number|null, aerial:boolean, carryM:number|null, distanceM:number|null}}
+ */
+export function shotFlight({ outcome, bat, extra }, rng) {
+  const none = { angleDeg: null, aerial: false, carryM: null, distanceM: null };
+  const { shot, runs, wicketKind, timing } = outcome;
+  if (extra === 'wide' || shot === 'leave' || wicketKind === 'bowled' || wicketKind === 'lbw') return none;
+  // A clean miss that didn't get out: no contact.
+  if (timing === 'miss' && !wicketKind) return none;
+
+  const aim = Number.isFinite(bat?.aimDeg) ? normAngle(bat.aimDeg) : DEFAULT_AIM[shot] ?? 0;
+  let angle;
+  if (timing === 'miss') {
+    // A thin edge behind: keeper or slips (off side behind square).
+    angle = -150 - rng.next() * 25;
+  } else {
+    const [lo, hi] = ANGLE_ERROR[timing] ?? [0, 0];
+    angle = aim + lo + rng.next() * (hi - lo);
+    // Late edges carry to the keeper and slips.
+    if (timing === 'late' && wicketKind === 'caught' && rng.next() < 0.5) angle = -140 - rng.next() * 30;
+  }
+  angle = Math.round(normAngle(angle));
+
+  const caught = wicketKind === 'caught';
+  const aerial = Boolean(bat?.aerial) || shot === 'loft' || runs === 6 || caught;
+  const between = (a, b) => Math.round(a + rng.next() * (b - a));
+  let carryM;
+  let distanceM;
+  if (runs === 6) {
+    carryM = between(ROPE_M + 3, ROPE_M + 25);
+    distanceM = carryM;
+  } else if (caught) {
+    carryM = timing === 'miss' || angle < -130 ? between(12, 22) : between(15, ROPE_M - 4);
+    distanceM = carryM;
+  } else if (runs === 4) {
+    carryM = aerial ? between(25, ROPE_M - 8) : 0;
+    distanceM = between(ROPE_M + 1, ROPE_M + 6);
+  } else if (shot === 'defend') {
+    carryM = 0;
+    distanceM = between(2, 9);
+  } else {
+    // Fielded: singles and twos go further than dots; aerial ones drop short.
+    const far = runs === 0 ? [12, 30] : runs === 1 ? [18, 40] : [35, 58];
+    distanceM = between(far[0], far[1]);
+    carryM = aerial ? Math.min(distanceM, between(15, 40)) : 0;
+  }
+  return { angleDeg: angle, aerial, carryM, distanceM };
 }
 
 const SHOT_WORDS = {
@@ -181,7 +297,17 @@ const SHOT_WORDS = {
 };
 
 /** Commentary line for a ball. Names are plain strings; UI must render with textContent. */
-export function commentaryFor({ runs, extra, wicketKind, timing, shot }, names, rng) {
+// Drive wording follows where the ball actually went (batter-relative angle).
+function driveWords(angleDeg) {
+  if (angleDeg == null) return null;
+  if (angleDeg >= -15 && angleDeg <= 15) return 'a crisp straight drive';
+  if (angleDeg < -15 && angleDeg >= -60) return 'a glorious cover drive';
+  if (angleDeg < -60) return 'a punchy square drive';
+  if (angleDeg <= 45) return 'a lovely on drive';
+  return 'a flick off the pads';
+}
+
+export function commentaryFor({ runs, extra, wicketKind, timing, shot, angleDeg = null }, names, rng) {
   const { batter = 'The batter', bowler = 'the bowler', fielder = 'the fielder' } = names ?? {};
   if (extra === 'wide') return `Wide from ${bowler}.`;
   const prefix = extra === 'noball' ? 'No ball! ' : '';
@@ -195,7 +321,9 @@ export function commentaryFor({ runs, extra, wicketKind, timing, shot }, names, 
     return lines[wicketKind];
   }
   if (shot === 'leave') return `${prefix}${batter} leaves it alone.`;
-  const how = rng.pick(SHOT_WORDS[shot] ?? ['a shot']);
+  // Always draw, so the match rng stream is the same whatever the wording.
+  const picked = rng.pick(SHOT_WORDS[shot] ?? ['a shot']);
+  const how = (shot === 'drive' && driveWords(angleDeg)) || picked;
   const timingNote = timing === 'early' ? ' Through early.' : timing === 'late' ? ' A touch late.' : timing === 'miss' ? ' Beaten!' : '';
   if (runs === 6) return `${prefix}SIX! ${batter} with ${how}, into the stands!`;
   if (runs === 4) return `${prefix}FOUR! ${how[0].toUpperCase() + how.slice(1)} from ${batter}.`;
