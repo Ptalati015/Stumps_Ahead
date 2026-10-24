@@ -590,11 +590,11 @@ Talati's feedback on v1.2.0 covers three things. Some balls on middle stump, inc
 
 | Bowler side | Right-hand batter | Left-hand batter |
 |---|---|---|
-| Over the wicket (right-arm bowler) | release on the off side, about -0.25 m | about +0.25 m, angling across him |
-| Around the wicket | about +0.85 m, angling in at the stumps | about -0.85 m |
+| Over the wicket (right-arm bowler) | about -0.25 m (off side), angling in | about +0.25 m (leg side), angling across |
+| Around the wicket | about +0.85 m (leg side), angling across | about -0.85 m (off side), angling in |
 
 **Effect:** the angle matters, but only a little.
-- **Angling in** (around to a right-hander, or over to a left-hander): bowled/LBW weight on straight lines up 10%.
+- **Angling in** (over to a right-hander, or around to a left-hander; released from the batter's off side): bowled/LBW weight on straight lines up 10%.
 - **Angling across:** edge weight on an off-stump line up 10%.
 - **Wides:** the 15.1 rule applies to the arrival point, which already includes the angle.
 
