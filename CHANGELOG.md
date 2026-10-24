@@ -2,6 +2,13 @@
 
 All notable changes to Stumps Ahead. Versions follow semantic versioning: features bump the minor version, fixes the patch.
 
+## 1.3.0 - 2026-10-24
+
+- Fix: wides are now decided only by where the ball reaches the batter (more than 0.9 m outside off, or past 0.45 m down leg). A ball on the stumps is never a wide; wayward deliveries can still drift wide.
+- Over or around the wicket: a bowling toggle that stays set between balls. The bowler runs in from that side, the umpire moves across, and the angle changes the ball's path and slightly shifts the chances of LBW and edges. The AI bowler switches sides too.
+- An arrival marker at the batter's crease shows where your delivery will reach the batter, and turns red if it will be a wide.
+- Batting: swipe-to-hit, the yellow aim arrow and the Aerial toggle are removed. Shot buttons (including Loft), moving the batter and the hit line stay.
+
 ## 1.2.0 - 2026-10-24
 
 - Venue screen: choosing the ground is now its own screen between Match Setup and the toss. It shows illustrated cards for both teams' home grounds, with Home/Away tags, city and a short description, and night versions with floodlights for a pink ball.
