@@ -275,3 +275,16 @@
 .pl-side-btn::before { content: '\25B8'; font-size: 0.85em; opacity: 0.55; }
 .pl-side-btn:first-child::before { content: '\25C2'; }
 .pl-side-btn[aria-pressed='true']::before, .pl-side-btn.pl-picked::before { opacity: 1; }
+
+/* v1.3.0 phones: the Side row adds a fifth bowling row, so tighten the
+   bowling controls and the strips above them to keep Bowl on a 667px
+   screen (the stage already sits at its 160px minimum). */
+@media (max-width: 899px) {
+  .pl { gap: 6px; }
+  .pl-over { min-height: 26px; }
+  .pl-comm { min-height: 2.4em; font-size: 15px; }
+  .pl-bowling { gap: 4px; }
+  .pl-bowling .pl-seg-btn { min-height: 36px; padding: 3px 2px; font-size: 13px; line-height: 1.15; }
+  .pl-bowling .pl-side-btn { min-height: 34px; }
+  .pl-bowling .pl-go { min-height: 44px; }
+}
