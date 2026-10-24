@@ -19,7 +19,7 @@ export const VENUES = [
   { id: 'wi-calypso', nation: 'WI', name: 'Calypso Park', city: 'St Delacroix', stands: ['#18806b', '#e2533a', '#f5efe0'], sky: '#9ad9ee' },
   { id: 'sa-karoo', nation: 'SA', name: 'Karoo Oval', city: 'Doringvlakte', stands: ['#a8763e', '#3e6b4f', '#efe6d4'], sky: '#a8d0ef' },
   { id: 'sa-jacaranda', nation: 'SA', name: 'Jacaranda Park', city: 'Riethoek', stands: ['#6d4fa3', '#2f7d4f', '#efeaf4'], sky: '#b4cdee' },
-  { id: 'sl-lotuslake', nation: 'SL', name: 'Lotus Lake Stadium', city: 'Wellagama', stands: ['#0a3d91', '#e5739a', '#f2eee6'], sky: '#9fd3ea' },
+  { id: 'sl-lotuslake', nation: 'SL', name: 'Lotus Lake Stadium', city: 'Nelumvale', stands: ['#0a3d91', '#e5739a', '#f2eee6'], sky: '#9fd3ea' },
   { id: 'sl-teahills', nation: 'SL', name: 'Tea Hills Oval', city: 'Theyilagama', stands: ['#2f6b3a', '#f5a301', '#eef0e6'], sky: '#b7d9cf' },
 ];
 
