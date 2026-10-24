@@ -1,4 +1,5 @@
 import { el } from '../dom.js';
+import { VERSION } from '../../version.js';
 
 export function mount(root, props, navigate) {
   const play = el('button', { className: 'btn btn--primary btn--xl', type: 'button', onClick: () => navigate('teamSelect') }, 'Play match');
@@ -14,7 +15,7 @@ export function mount(root, props, navigate) {
       el('summary', {}, 'How to play'),
       el('ol', {},
         el('li', {}, 'Pick your nation and an opponent. Squads are made up fresh every match.'),
-        el('li', {}, 'Choose 2, 5 or 10 overs and a difficulty.'),
+        el('li', {}, 'Choose 2, 5 or 10 overs, a difficulty, a ground and the ball. Pink means a day-night match.'),
         el('li', {}, 'Call the toss. If you win, choose to bat or bowl.'),
         el('li', {}, 'Batting: tap a shot (Defend, Drive, Pull, Cut, Loft) just as the ball arrives. Timing is everything.'),
         el('li', {}, 'Bowling: pick a bowler each over, then a line and length, and stop the meter in the green.'),
@@ -22,6 +23,7 @@ export function mount(root, props, navigate) {
       ),
     ),
     el('p', { className: 'footnote' }, 'All players are fictional. Not affiliated with any cricket board or game publisher.'),
+    el('p', { className: 'version' }, `v${VERSION}`),
   ));
   play.focus();
   return () => {};

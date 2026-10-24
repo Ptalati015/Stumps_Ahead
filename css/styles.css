@@ -213,6 +213,16 @@ button { font: inherit; color: inherit; }
   -webkit-user-select: none;
 }
 .seg--on { border-color: var(--accent); background: var(--accent); color: var(--accent-text); }
+.segmented--grid .segmented__opts { display: grid; grid-template-columns: 1fr 1fr; }
+.seg__main, .seg__sub { display: block; }
+.seg__sub { font-size: .75rem; opacity: .75; font-weight: 400; }
+.seg .ball-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; border: 1px solid rgba(0, 0, 0, .35); }
+.ball-dot--red { background: #b3202a; }
+.ball-dot--white { background: #f4f2ea; }
+.ball-dot--pink { background: #ff5fa2; }
+.hint { color: var(--muted); font-size: .85rem; margin: -8px 0 8px; }
+.venue-line { text-align: center; color: var(--muted); font-size: .9rem; margin: 4px 0 10px; }
+.version { color: var(--muted); opacity: .6; font-size: .72rem; text-align: center; margin: 4px 0 12px; }
 
 /* ---------- Toss ---------- */
 

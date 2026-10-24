@@ -53,7 +53,7 @@ export function createPerson(parent, opts) {
   const handR = svg('circle', { r: opts.gloves ? 0.09 : 0.05, fill: opts.gloves ?? SKIN }, g);
   let bat = null;
   if (opts.bat) bat = limb(g, BAT_WOOD, 0.1);
-  const heldBall = svg('circle', { r: 0.05, fill: '#c1121f' }, g);
+  const heldBall = svg('circle', { r: 0.05, fill: 'url(#sc-ball)' }, g);
   heldBall.setAttribute('visibility', 'hidden');
 
   /** p: { run, runAmt, armR, armL, crouch, bound, lean, spread } (angles in degrees, 0 = hanging down) */
