@@ -32,6 +32,8 @@
  * @property {'off'|'middle'|'leg'} line
  * @property {'yorker'|'full'|'good'|'short'} length
  * @property {number} accuracy      0..1 from the power meter (AI supplies its own)
+ * @property {{x:number, z:number}} [pitch]   landing spot; x metres batter-relative (+ = leg side, 0 = middle stump), z metres from the batter's stumps
+ * @property {'stock'|'in'|'out'|'slower'} [variation]
  */
 
 /** @typedef {Object} BatInput

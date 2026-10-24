@@ -230,7 +230,9 @@ function scriptedMatch(extra = () => ({})) {
     if (s.status === 'awaiting_bowler') { s = setBowler(s, aiChooseBowler(s)); continue; }
     const shot = SHOT_CYCLE[i % 6];
     const bat = shot === 'leave' ? { shot, timingMs: null } : { shot, timingMs: ((i * 37) % 400) - 200 };
-    const r = playBall(s, aiBowl(s), { ...bat, ...extra(i) });
+    // Stock BowlInput (no pitch/variation), as the AI bowled before phase 4.
+    const { line, length, accuracy } = aiBowl(s);
+    const r = playBall(s, { line, length, accuracy }, { ...bat, ...extra(i) });
     s = r.state;
     i++;
     out.push(`${r.ball.runs}${r.ball.extra ? r.ball.extra.type[0] : ''}${r.ball.wicket ? 'W' : ''}`);
@@ -326,4 +328,118 @@ test('drive commentary follows where the ball went', () => {
     const { ball } = findBall(s, (r) => r.ball.runs === 4 && r.ball.timing === 'perfect' && !r.ball.extra, { shot: 'drive', timingMs: 0, aimDeg: Number(aim) });
     assert.match(ball.commentary, new RegExp(word, 'i'));
   }
+});
+
+// ---- Phase 4: landing spot and variations (SPEC 13.3) ----
+import { prepareDelivery, lengthFromZ, lineFromX, swungLine } from '../js/engine/outcomes.js';
+
+test('landing spot bucket edges', () => {
+  assert.equal(lengthFromZ(2.49), 'yorker');
+  assert.equal(lengthFromZ(2.5), 'full');
+  assert.equal(lengthFromZ(4.99), 'full');
+  assert.equal(lengthFromZ(5), 'good');
+  assert.equal(lengthFromZ(7.99), 'good');
+  assert.equal(lengthFromZ(8), 'short');
+  assert.equal(lineFromX(-0.09), 'off');
+  assert.equal(lineFromX(-0.08), 'middle');
+  assert.equal(lineFromX(0.08), 'middle');
+  assert.equal(lineFromX(0.09), 'leg');
+  const bowler = { bowling: 90, bowlType: 'pace' };
+  const d = prepareDelivery({ line: 'leg', length: 'short', accuracy: 1, pitch: { x: -0.3, z: 3 } }, bowler, createRng(1));
+  assert.equal(d.line, 'off'); // pitch wins over line/length
+  assert.equal(d.length, 'full');
+  const wide = prepareDelivery({ line: 'off', length: 'good', accuracy: 1, pitch: { x: -0.95, z: 6 } }, bowler, createRng(1));
+  assert.equal(wide.extra, 'wide');
+});
+
+test('stock deliveries without pitch/variation are unchanged', () => {
+  const bowler = { bowling: 70, bowlType: 'pace' };
+  for (let seed = 1; seed < 200; seed++) {
+    const bowl = { line: 'off', length: 'good', accuracy: (seed % 10) / 10 };
+    const plain = prepareDelivery(bowl, bowler, createRng(seed));
+    const stock = prepareDelivery({ ...bowl, variation: 'stock' }, bowler, createRng(seed));
+    assert.deepEqual(stock, plain);
+    assert.equal(plain.pitch, null);
+    assert.equal(plain.swingX, 0);
+  }
+});
+
+test('landing spot scatter grows as accuracy drops', () => {
+  const bowler = { bowling: 70, bowlType: 'pace' };
+  const spread = (accuracy) => {
+    const rng = createRng(5);
+    let sx = 0, sz = 0;
+    for (let i = 0; i < 2000; i++) {
+      const d = prepareDelivery({ line: 'off', length: 'good', accuracy, pitch: { x: -0.2, z: 6 } }, bowler, rng);
+      sx += (d.pitch.x + 0.2) ** 2;
+      sz += (d.pitch.z - 6) ** 2;
+    }
+    return [Math.sqrt(sx / 2000), Math.sqrt(sz / 2000)];
+  };
+  const [x1, z1] = spread(1);
+  const [x6, z6] = spread(0.6);
+  const [x2, z2] = spread(0.2);
+  assert.ok(x1 < 0.01 && z1 < 0.01);
+  assert.ok(x6 > x1 && x2 > x6 * 1.5, `${x1} ${x6} ${x2}`);
+  assert.ok(z6 > z1 && z2 > z6 * 1.5, `${z1} ${z6} ${z2}`);
+});
+
+test('swing/turn shifts the line one step and slower adds 25% to travel time', () => {
+  assert.equal(swungLine('off', 'in'), 'middle');
+  assert.equal(swungLine('middle', 'out'), 'off');
+  assert.equal(swungLine('off', 'out'), 'off');
+  for (const bowlType of ['pace', 'spin']) {
+    const bowler = { bowling: 80, bowlType };
+    for (let seed = 1; seed < 50; seed++) {
+      const bowl = { line: 'middle', length: 'good', accuracy: 1 };
+      const stock = prepareDelivery(bowl, bowler, createRng(seed));
+      const slower = prepareDelivery({ ...bowl, variation: 'slower' }, bowler, createRng(seed));
+      assert.equal(slower.travelMs, Math.round(stock.travelMs * 1.25));
+      assert.ok(slower.kph < stock.kph);
+      const inn = prepareDelivery({ ...bowl, variation: 'in' }, bowler, createRng(seed));
+      const out = prepareDelivery({ ...bowl, variation: 'out' }, bowler, createRng(seed));
+      assert.equal(inn.line, 'leg');
+      assert.equal(out.line, 'off');
+      assert.ok(inn.swingX > 0 && out.swingX < 0);
+    }
+  }
+});
+
+test('outswing raises edges and inswing raises bowled/LBW over 2,000 balls', () => {
+  const rate = (delivery, bat, kinds) => {
+    const rng = createRng(11);
+    let n = 0;
+    for (let i = 0; i < 2000; i++) {
+      const r = resolveOutcome({ delivery, bat, batter: { batting: 65 }, bowler: { bowling: 75 }, difficulty: 'normal', userBatting: true, rng });
+      if (kinds.includes(r.wicketKind)) n++;
+    }
+    return n;
+  };
+  const edgyDrive = { shot: 'drive', timingMs: 200 };
+  const stockEdges = rate({ line: 'off', length: 'good', variation: 'stock' }, edgyDrive, ['caught']);
+  const outEdges = rate({ line: 'off', length: 'good', variation: 'out' }, edgyDrive, ['caught']);
+  assert.ok(outEdges > stockEdges * 1.3, `${stockEdges} -> ${outEdges}`);
+
+  const defend = { shot: 'defend', timingMs: 400 };
+  const stockStumps = rate({ line: 'middle', length: 'good', variation: 'stock' }, defend, ['bowled', 'lbw']);
+  const inStumps = rate({ line: 'middle', length: 'good', variation: 'in' }, defend, ['bowled', 'lbw']);
+  assert.ok(inStumps > stockStumps * 1.3, `${stockStumps} -> ${inStumps}`);
+});
+
+test('the AI bowler uses fine spots and variations about 30% of the time', () => {
+  let s = createMatch(fixtureConfig({ overs: 10, seed: 3 }));
+  let fancy = 0, total = 0;
+  while (s.status !== 'complete' && total < 300) {
+    if (s.status === 'innings_break') { s = startSecondInnings(s); continue; }
+    if (s.status === 'awaiting_bowler') { s = setBowler(s, aiChooseBowler(s)); continue; }
+    const bowl = aiBowl(s);
+    if (bowl.pitch) {
+      fancy++;
+      assert.ok(['stock', 'in', 'out', 'slower'].includes(bowl.variation));
+    }
+    total++;
+    s = playBall(s, bowl, aiBat(s, bowl)).state;
+  }
+  const share = fancy / total;
+  assert.ok(share > 0.2 && share < 0.4, `share ${share}`);
 });
