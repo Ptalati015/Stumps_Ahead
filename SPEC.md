@@ -649,7 +649,7 @@ Ayush's PR merges first. Karen bumps `VERSION` to `1.3.0` and adds a CHANGELOG e
    - no ball whose arrival |x| ≤ 0.45 m on the off side or ≤ 0.2 m on the stumps line is ever a wide;
    - every wide is beyond a wide line;
    - wides per over stay within about ±30% of v1.2.0.
-2. **Yorkers and the arrival marker:** a yorker on middle at 100% accuracy is never a wide unless the arrival marker showed red. The marker matches the engine's arrival point at 100% accuracy (within 0.05 m) for every side, handedness, length and variation, and turns red exactly when that point is past a wide line.
+2. **Yorkers and the arrival marker:** a yorker on middle at 100% accuracy is never a wide unless the arrival marker showed red. The marker matches the engine's arrival point at 100% accuracy, for every side, handedness, length and variation. It must be within 0.05 m for stock, slower and spin, and within 0.08 m for inswing and outswing, because the swing amount stays random (0.25 to 0.40 m) and the marker uses the average, 0.325 m., and turns red exactly when that point is past a wide line.
 3. **Over/Around:** the toggle works and persists between balls. The bowler visibly runs in from the chosen side and the umpire swaps. The ball angles in from around and across from over, for both left- and right-handed batters. It stays on the pitch except for wides.
 4. **Batting input:** there is no swipe-to-hit, no aim arrow and no Aerial toggle. Every shot button still works and the hit line still shows. Moving the batter by ◀ ▶ and by drag works before release.
 5. **Compatibility:** seeded results without the `side` field match v1.2.0, apart from the intended wide-rule change.
