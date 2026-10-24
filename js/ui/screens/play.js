@@ -6,7 +6,7 @@ import {
 } from '../../engine/match.js';
 import {
   SHOTS, SHOT_LABELS, LINES, LENGTHS, LINE_LABELS, LENGTH_LABELS, TIMING_WINDOWS, DEFAULT_AIM, OFFSET_STEP_M,
-  VARIATIONS, SIDES, lineFromX, lengthFromZ,
+  VARIATIONS, SIDES, PAD_SECTORS, clampAim, lineFromX, lengthFromZ,
 } from '../../engine/outcomes.js';
 import { createScene } from '../scene/scene.js';
 import { attachDrag, dragToOffset, clampOffset } from '../input/swipe.js';
@@ -16,6 +16,21 @@ const PAUSE_AFTER_BALL_MS = 1100;
 const PAUSE_BEFORE_NAV_MS = 1800;
 const METER_PERIOD_MS = 1100;
 const SHOT_KEYS = { defend: 'd', drive: 'f', pull: 'p', cut: 'c', loft: 'l' };
+// Milestone banner (SPEC 16.2): after the ball's own flash, for about 1.5 s.
+const BANNER_DELAY_MS = 1500;
+const BANNER_MS = 1500;
+const BANNERS = { hattrick: 'HAT-TRICK!', hundred: 'HUNDRED!', fifty: 'FIFTY!', fivefor: 'FIVE-FOR!' };
+// Direction pad (SPEC 16.1), in DOM order as a right-hander sees the field
+// from behind: the off side (Cover, Point, Third man) is screen right, the
+// same side the move buttons use. null is the empty cell. A left-hander's pad
+// is mirrored with a class, so the DOM order never changes.
+const PAD_CELLS = [
+  ['midwicket', 'Mid-wicket'], ['straight', 'Straight'], ['cover', 'Cover'],
+  ['squareleg', 'Square leg'], ['auto', 'Auto'], ['point', 'Point'],
+  ['fineleg', 'Fine leg'], null, ['thirdman', 'Third man'],
+];
+// Numpad layout 7 8 9 / 4 5 6 / 1 _ 3 by position on screen, with 5 = Auto.
+const PAD_KEY_CELL = { 7: 0, 8: 1, 9: 2, 4: 3, 5: 4, 6: 5, 1: 6, 3: 8 };
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -76,7 +91,15 @@ export function mount(root, props, navigate) {
   const controls = el('div', 'pl-controls');
   const venueLine = el('div', 'pl-venue');
   venueLine.hidden = true;
-  scoreSlot.append(miniScore, venueLine);
+  // Score on the left, pause on the right (SPEC 16.3). Laid out through
+  // CSSOM so it holds under the strict CSP; Joel styles .pl-pause.
+  const scoreMain = el('div', 'pl-score-main');
+  Object.assign(scoreSlot.style, { display: 'flex', alignItems: 'flex-start', gap: '8px' });
+  Object.assign(scoreMain.style, { flex: '1 1 auto', minWidth: '0' });
+  scoreMain.append(miniScore, venueLine);
+  const pauseBtn = button('pl-btn pl-pause', '\u23F8', () => requestPause());
+  pauseBtn.setAttribute('aria-label', 'Pause');
+  scoreSlot.append(scoreMain, pauseBtn);
   if (state.config.venueId) {
     import('../../data/venues.js')
       .then((m) => {
@@ -107,7 +130,7 @@ export function mount(root, props, navigate) {
     .then((m) => {
       if (!alive || typeof m.renderScoreboard !== 'function') return;
       renderScoreboard = m.renderScoreboard;
-      scoreSlot.prepend(boardEl);
+      scoreMain.prepend(boardEl);
       miniScore.hidden = true;
       renderInfo();
     })
@@ -206,6 +229,20 @@ export function mount(root, props, navigate) {
     if (extraLabel) flash.append(el('small', null, extraLabel));
   }
 
+  // "FIFTY! name" in the milestone player's team colours (SPEC 16.2).
+  function showBanner(kind, playerId) {
+    const inn = currentInnings(state);
+    const player = playerById(state, playerId);
+    const team = teamByCode(state, kind === 'fifty' || kind === 'hundred' ? inn.battingTeam : inn.bowlingTeam);
+    flash.style.setProperty('--team-primary', team.colors.primary);
+    flash.style.setProperty('--team-secondary', team.colors.secondary);
+    flash.className = 'pl-flash pl-flash-on pl-flash-milestone';
+    flash.textContent = '';
+    flash.append(el('span', null, BANNERS[kind]));
+    if (player) flash.append(el('small', null, player.name));
+  }
+  const bannerFor = (ball) => Object.keys(BANNERS).map((kind) => ball.milestones?.find((m) => m.kind === kind)).find(Boolean) ?? null;
+
   // ---- Game loop ----
   // The scene acts the ball out; the banner, commentary and score land at its climax.
   function afterBall(result, timingLabel) {
@@ -216,7 +253,12 @@ export function mount(root, props, navigate) {
       commentary.textContent = result.ball.commentary;
       renderInfo();
     }, flashAt);
-    const settle = Math.max(flashAt, total);
+    const banner = bannerFor(result.ball);
+    let settle = Math.max(flashAt, total);
+    if (banner) {
+      later(() => showBanner(banner.kind, banner.playerId), flashAt + BANNER_DELAY_MS);
+      settle = Math.max(settle, flashAt + BANNER_DELAY_MS + BANNER_MS);
+    }
     if (state.status === 'innings_break') {
       later(() => navigate('inningsBreak', { ...props, match: state }), settle + PAUSE_BEFORE_NAV_MS);
     } else if (state.status === 'complete') {
@@ -226,7 +268,81 @@ export function mount(root, props, navigate) {
     }
   }
 
+  // ---- Pause (SPEC 16.3) ----
+  // A ball in progress finishes first: pause is queued and the sheet opens
+  // from next(), before the next run-up or bowling controls. Between balls it
+  // opens at once. While it is open no key reaches the screen and no ball starts.
+  let busy = false;
+  let paused = false;
+  let pauseQueued = false;
+  let resumeWith = null;
+  let closeSheet = null;
+  function requestPause() {
+    if (paused || !alive) return;
+    if (busy) {
+      pauseQueued = true;
+      pauseBtn.disabled = true;
+      return;
+    }
+    openPause(null);
+  }
+  function openPause(onResumed) {
+    paused = true;
+    pauseQueued = false;
+    pauseBtn.disabled = true;
+    resumeWith = onResumed;
+    const stashed = keyHandler;
+    setKeyHandler(null);
+    const resume = () => {
+      if (!alive || !paused) return;
+      closeSheet = null;
+      paused = false;
+      pauseBtn.disabled = false;
+      setKeyHandler(stashed);
+      const go = resumeWith;
+      resumeWith = null;
+      go?.();
+    };
+    const quit = () => {
+      if (!alive) return;
+      closeSheet = null;
+      navigate('menu');
+    };
+    import('../components/pauseSheet.js')
+      .then((m) => {
+        if (!alive || !paused) return;
+        closeSheet = typeof m.openPauseSheet === 'function' ? m.openPauseSheet(root, state, { onResume: resume, onQuit: quit }) : fallbackSheet(resume, quit);
+      })
+      .catch(() => {
+        if (alive && paused) closeSheet = fallbackSheet(resume, quit);
+      });
+  }
+  // If Joel's sheet is not there: Resume and Quit, nothing else.
+  function fallbackSheet(onResume, onQuit) {
+    const overlay = el('div', 'ps');
+    Object.assign(overlay.style, { position: 'fixed', inset: '0', zIndex: '40', display: 'grid', placeItems: 'center', background: 'rgba(0, 0, 0, 0.7)' });
+    const sheet = el('div', 'ps-sheet');
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-modal', 'true');
+    sheet.setAttribute('aria-label', 'Paused');
+    Object.assign(sheet.style, { display: 'grid', gap: '10px', padding: '16px', borderRadius: '14px', background: 'var(--pl-panel, #16281e)' });
+    const resumeBtn = button('pl-btn', 'Resume', () => { close(); onResume(); });
+    const quitBtn = button('pl-btn', 'Quit to menu', () => { close(); onQuit(); });
+    sheet.append(el('h2', 'ps-title', 'Paused'), resumeBtn, quitBtn);
+    overlay.append(sheet);
+    root.append(overlay);
+    resumeBtn.focus();
+    function close() { overlay.remove(); }
+    return close;
+  }
+
   function next() {
+    busy = false;
+    if (pauseQueued) {
+      // The ball has settled: open the sheet now and carry on from here on Resume.
+      openPause(next);
+      return;
+    }
     resetBall();
     renderInfo();
     if (state.status === 'awaiting_bowler') {
@@ -249,17 +365,27 @@ export function mount(root, props, navigate) {
   // User bats: AI bowls. Before release the user can shuffle across the
   // crease; after it, tap (or key) a shot button to play. Loft is always
   // in the air (SPEC 15.3).
+  // Direction pad selection: null is Auto. It stays between balls and resets
+  // for a new batter or innings (SPEC 16.1).
+  let padAim = null;
+  let padOwner = null;
   function userBats() {
+    busy = true;
     const bowl = aiBowl(state);
     const delivery = previewDelivery(state, bowl);
     const bats = strikerBats();
     scene.setBowlingSide?.(delivery.side);
     scene.setMarker(delivery);
     controls.textContent = '';
-    controls.className = 'pl-controls pl-shots';
+    controls.className = 'pl-controls pl-batting';
     let played = false;
     let releaseAt = null;
     let offsetX = 0;
+    const owner = `${state.current}:${currentInnings(state).strikerId}`;
+    if (owner !== padOwner) {
+      padOwner = owner;
+      padAim = null;
+    }
 
     // Movement: ◀ ▶ move the batter that way on screen. A right-hander's
     // off side is screen right, so screen left is toward his leg side.
@@ -281,15 +407,57 @@ export function mount(root, props, navigate) {
     const moveRow = el('div', 'pl-move-row');
     moveRow.append(moveLeft, moveRight);
 
+    // Direction pad: off side on screen right for a right-hander; mirrored for
+    // a left-hander with the same sign as the move buttons. Joel styles .pl-pad.
+    const mirrored = screenLeftSign < 0;
+    const pad = el('div', mirrored ? 'pl-pad pl-pad--mirror' : 'pl-pad');
+    pad.setAttribute('role', 'group');
+    pad.setAttribute('aria-label', 'Shot direction');
+    const padButtons = [];
+    for (const cell of PAD_CELLS) {
+      if (!cell) {
+        const spacer = el('span', 'pl-pad-spacer');
+        spacer.setAttribute('aria-hidden', 'true');
+        pad.append(spacer);
+        continue;
+      }
+      const [sector, label] = cell;
+      const b = button('pl-btn pl-pad-btn', label, () => pickSector(sector));
+      b.dataset.sector = sector;
+      b.setAttribute('aria-label', sector === 'auto' ? 'Auto: each shot to its natural area' : `Aim ${label.toLowerCase()}`);
+      padButtons.push(b);
+      pad.append(b);
+    }
+    const lightPad = () => {
+      for (const b of padButtons) {
+        const on = b.dataset.sector === 'auto' ? padAim == null : PAD_SECTORS[b.dataset.sector] === padAim;
+        b.classList.toggle('pl-picked', on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      }
+    };
+    function pickSector(sector) {
+      if (played) return;
+      padAim = sector === 'auto' ? null : PAD_SECTORS[sector] ?? null;
+      lightPad();
+    }
+    lightPad();
+
     const buttons = SHOTS.map((shot) => {
-      const b = button('pl-btn pl-shot', SHOT_LABELS[shot], () => playShot({ shot, aimDeg: DEFAULT_AIM[shot], aerial: shot === 'loft' }));
+      const b = button('pl-btn pl-shot', SHOT_LABELS[shot], () => playShot(shot));
       b.dataset.shot = shot;
       b.append(el('kbd', 'pl-key', SHOT_KEYS[shot].toUpperCase()));
       b.disabled = true;
       return b;
     });
-    controls.append(moveRow, ...buttons);
-    const hint = el('p', 'pl-hint', 'Move before the ball, then tap a shot.');
+    // Pad on the left, shots on the right (two columns, Loft across the bottom).
+    const shotCol = el('div', 'pl-shot-col');
+    Object.assign(shotCol.style, { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' });
+    buttons[buttons.length - 1].style.gridColumn = '1 / -1';
+    shotCol.append(...buttons);
+    const batRow = el('div', 'pl-bat-row');
+    batRow.append(pad, shotCol);
+    controls.append(moveRow, batRow);
+    const hint = el('p', 'pl-hint', 'Move before the ball, aim with the pad, then tap a shot.');
     controls.append(hint);
 
     // Drag zone: lower half of the delivery view, only until release.
@@ -314,24 +482,38 @@ export function mount(root, props, navigate) {
         step(e.key === 'ArrowLeft' ? 1 : -1);
         return;
       }
+      if (PAD_KEY_CELL[e.key] != null) {
+        e.preventDefault();
+        // Keys follow the screen: a mirrored pad swaps the columns.
+        let i = PAD_KEY_CELL[e.key];
+        if (mirrored) i = i - (i % 3) + (2 - (i % 3));
+        const cell = PAD_CELLS[i];
+        if (cell) pickSector(cell[0]);
+        return;
+      }
       const shot = Object.keys(SHOT_KEYS).find((k) => SHOT_KEYS[k] === e.key.toLowerCase());
-      if (shot) playShot({ shot, aimDeg: DEFAULT_AIM[shot], aerial: shot === 'loft' });
+      if (shot) playShot(shot);
     }
-    function playShot({ shot, aimDeg, aerial }, atMs = performance.now()) {
+    // The pad's aim, or the shot's own (Auto). The engine clamps a pad aim to
+    // the shot's arc; the scene swings the same way.
+    const aimFor = (shot) => (padAim == null ? { aimDeg: DEFAULT_AIM[shot], aimSource: 'auto' } : { aimDeg: clampAim(shot, padAim), aimSource: 'pad' });
+    function playShot(shot, atMs = performance.now()) {
       if (played || releaseAt == null) return;
       played = true;
+      const { aimDeg, aimSource } = aimFor(shot);
+      const aerial = shot === 'loft';
       scene.swing(shot, { aimDeg, aerial });
-      finish({ shot, aimDeg, aerial }, atMs - releaseAt - delivery.travelMs);
+      finish({ shot, aimDeg, aimSource, aerial }, atMs - releaseAt - delivery.travelMs);
     }
-    function finish({ shot, aimDeg = 0, aerial = false }, timingMs) {
+    function finish({ shot, aimDeg = 0, aimSource = 'auto', aerial = false }, timingMs) {
       played = true;
       setKeyHandler(null);
       detachDrag();
-      [moveLeft, moveRight, ...buttons].forEach((b) => (b.disabled = true));
+      [moveLeft, moveRight, ...buttons, ...padButtons].forEach((b) => (b.disabled = true));
       buttons.forEach((b) => b.dataset.shot === shot && b.classList.add('pl-picked'));
       const bat = shot === 'leave'
         ? { shot: 'leave', timingMs: null, offsetX }
-        : { shot, timingMs: Math.round(timingMs), offsetX, aimDeg, aerial };
+        : { shot, timingMs: Math.round(timingMs), offsetX, aimDeg, aimSource, aerial };
       const result = playBall(state, bowl, bat);
       const label = shot === 'leave' || delivery.extra === 'wide' ? null : timingLabel(result.ball.timing, bat.timingMs);
       afterBall(result, label);
@@ -339,7 +521,7 @@ export function mount(root, props, navigate) {
     setKeyHandler(onKey);
     setOffset(0);
 
-    commentary.textContent = `${playerById(state, currentInnings(state).bowlerId).name} runs in...`;
+    commentary.textContent = `${runUpNote(delivery)}${playerById(state, currentInnings(state).bowlerId).name} runs in...`;
     speed.textContent = `${delivery.kph} kph`;
     scene.runUp(RUN_UP_MS);
     later(() => {
@@ -356,6 +538,14 @@ export function mount(root, props, navigate) {
     }, RUN_UP_MS);
   }
 
+  // "On a hat-trick!" and the last-over line, said during the run-up (SPEC 16.2).
+  function runUpNote(delivery) {
+    const parts = [];
+    if (delivery.note) parts.push(delivery.note);
+    if (delivery.hattrickBall) parts.push('On a hat-trick!');
+    return parts.length ? `${parts.join(' ')} ` : '';
+  }
+
   function timingLabel(grade, ms) {
     if (!grade) return null;
     const names = { perfect: 'Perfect timing', good: 'Good timing', early: 'Early', late: 'Late', miss: 'Missed' };
@@ -364,6 +554,7 @@ export function mount(root, props, navigate) {
 
   // User bowls: pick the bowler for the over.
   function showBowlerPicker() {
+    busy = false;
     const inn = currentInnings(state);
     const legal = new Set(availableBowlers(state).map((p) => p.id));
     const cap = maxOversPerBowler(state);
@@ -477,6 +668,8 @@ export function mount(root, props, navigate) {
     function press() {
       if (done) return;
       if (!meterRunning) {
+        // From here the ball is in progress: a pause waits for it to settle.
+        busy = true;
         meterRunning = true;
         scene.enableMarkerDrag?.(null);
         meterStart = performance.now();
@@ -514,7 +707,7 @@ export function mount(root, props, navigate) {
     scene.setBatter?.({ bats: strikerBats(), offsetX: bat.offsetX ?? 0 });
     scene.setMarker(delivery);
     const accuracyText = `Accuracy ${Math.round(bowl.accuracy * 100)}%`;
-    commentary.textContent = `${accuracyText}. ${playerById(state, currentInnings(state).bowlerId).name} runs in...`;
+    commentary.textContent = `${accuracyText}. ${runUpNote(delivery)}${playerById(state, currentInnings(state).bowlerId).name} runs in...`;
     speed.textContent = `${delivery.kph} kph`;
     scene.runUp(RUN_UP_MS);
     later(() => {
@@ -548,6 +741,8 @@ export function mount(root, props, navigate) {
     frames.clear();
     setKeyHandler(null);
     detachDrag();
+    closeSheet?.();
+    closeSheet = null;
     scene.enableMarkerDrag?.(null);
     scene.destroy();
     root.textContent = '';

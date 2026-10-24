@@ -13,6 +13,9 @@ import {
 import { fixtureConfig } from './fixtures.js';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Does `text` contain a filled-in line of COMMENTARY[key]? Wording-agnostic. */
+const saysKey = (text, key) => COMMENTARY[key].some((tpl) => new RegExp(esc(tpl).replace(/\\\{\w+\\\}/g, '.+?')).test(text));
 
 // ---- 16.1 direction pad -----------------------------------------------------
 
@@ -140,7 +143,7 @@ test('commentaryLine never repeats the previous line for a key and fills every p
   }
   // A no-ball gets its own line in front.
   const nb = commentaryFor({ runs: 1, extra: 'noball', wicketKind: null, timing: 'good', shot: 'drive', angleDeg: 0 }, { batter: 'A', bowler: 'B' }, createRng(1), { last: {}, pickRng: createRng(2) });
-  assert.match(nb, /^(No ball|The umpire calls no ball)/);
+  assert.ok(saysKey(nb, 'noball') && saysKey(nb, 'single'), nb);
   // Unknown key: the key itself, so a missing line never throws.
   assert.equal(commentaryLine('nope', {}, { lines: {} }), 'nope');
 });
@@ -180,6 +183,11 @@ test('match commentary: no placeholders, no back-to-back repeats, varied dots', 
   assert.ok(dotBall < dots * 0.2, `"Dot ball." ${dotBall} of ${dots}`);
   // The old wording is gone: dots describe the ball.
   const distinctDotLines = new Set(all.filter((b) => b.runs === 0 && !b.extra && !b.wicket).map((b) => b.commentary.replace(/[A-Z][a-z]+ [A-Z][a-z]+/g, 'X')));
+  // Every ball's line comes from the data for its key (plus at most one extra line).
+  for (const b of all.slice(0, 200)) {
+    const key = commentaryKey({ runs: b.runs, extra: b.extra?.type ?? null, wicketKind: b.wicket?.kind ?? null, timing: b.timing, shot: b.shot, angleDeg: b.angleDeg });
+    assert.ok(saysKey(b.commentary, key), `${key}: ${b.commentary}`);
+  }
   assert.ok(distinctDotLines.size >= 8, `${distinctDotLines.size} dot lines`);
 });
 
@@ -197,8 +205,8 @@ test('milestones from seeded matches: fifty, three-for and partnership fifty eac
         }
         perInnings[k] = true;
         // The ball's commentary mentions the biggest milestone.
-        if (m.kind === 'fifty') assert.match(b.commentary, /fifty|Fifty|FIFTY/);
-        if (m.kind === 'maiden' && !b.milestones.some((x) => x.kind !== 'maiden')) assert.match(b.commentary, /maiden|Maiden/);
+        if (m.kind === 'fifty') assert.ok(saysKey(b.commentary, 'fifty'), b.commentary);
+        if (m.kind === 'maiden' && !b.milestones.some((x) => x.kind !== 'maiden')) assert.ok(saysKey(b.commentary, 'maiden'), b.commentary);
       }
       if (b.milestones.some((m) => m.kind === 'maiden')) {
         assert.ok(b.runs === 0 && !b.extra);
@@ -243,7 +251,7 @@ test('hat-trick: on a hat-trick after two in two, the hat-trick itself, run outs
   r = force(s, bowlerWicket);
   assert.deepEqual(r.ball.milestones.filter((m) => m.kind === 'hattrick'), [{ kind: 'hattrick', playerId: bowler }]);
   assert.ok(r.ball.milestones.some((m) => m.kind === 'threefor'));
-  assert.match(r.ball.commentary, /HAT-TRICK|hat-trick/);
+  assert.ok(saysKey(r.ball.commentary, 'hattrick'), r.ball.commentary);
   // Four in four is not announced as a second hat-trick ball? It is: still two in two.
   assert.equal(previewDelivery(r.state, { line: 'off', length: 'good', accuracy: 1 }).hattrickBall, true);
   // A dot ends it.
@@ -284,7 +292,7 @@ test('hat-trick carries across the bowler\'s overs; five-for and maiden fire onc
   r = force(s, bowlerWicket);
   assert.deepEqual(r.ball.milestones.filter((m) => m.kind === 'fivefor'), [{ kind: 'fivefor', playerId: bowler }]);
   // Five in a row is also another hat-trick, which outranks the five-for in the one extra line.
-  assert.match(r.ball.commentary, /hat-trick/i);
+  assert.ok(saysKey(r.ball.commentary, 'hattrick'), r.ball.commentary);
   const fiveOnly = force(s, bowlerWicket);
   void fiveOnly;
 });
@@ -294,7 +302,7 @@ test('a wicket maiden is a maiden; a maiden ends with the maiden line', () => {
   for (let i = 0; i < 5; i++) s = force(s, quietDot).state;
   const r = force(s, quietDot);
   assert.ok(r.ball.milestones.some((m) => m.kind === 'maiden'));
-  assert.match(r.ball.commentary, /maiden|Maiden/);
+  assert.ok(saysKey(r.ball.commentary, 'maiden'), r.ball.commentary);
   // A single anywhere in the over: no maiden.
   s = ready(r.state);
   s = force(s, (x) => x.ball.runs === 1 && !x.ball.extra).state;
@@ -340,7 +348,7 @@ test('hundred and partnership fifty fire on the ball they happen; won_it on the 
   }
   assert.equal(m.status, 'complete');
   assert.ok(last.ball.note && last.ball.commentary.endsWith(last.ball.note));
-  assert.ok(COMMENTARY.won_it.includes(last.ball.note));
+  assert.ok(saysKey(last.ball.note, 'won_it'), last.ball.note);
 });
 
 test('last over of a chase: the run-up note says what is needed', () => {
