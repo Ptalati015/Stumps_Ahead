@@ -1,8 +1,7 @@
-// Overs, difficulty, venue and ball.
+// Overs, difficulty and ball; the ground is chosen next, on the Venue screen.
 // props: { fixture, rng, userCode, aiCode, overs?, difficulty?, venueId?, ball? }
 
 import { el, teamBadge } from '../dom.js';
-import { venuesFor } from '../../data/venues.js';
 
 const OVERS = [2, 5, 10];
 const DIFFICULTY = [['easy', 'Easy'], ['normal', 'Normal'], ['hard', 'Hard']];
@@ -16,16 +15,13 @@ export function mount(root, props, navigate) {
   }
   let overs = props.overs || 5;
   let difficulty = props.difficulty || 'normal';
-  // The user's two grounds first, then the opponent's (SPEC 13.4).
-  const venues = [...venuesFor(fixture.userTeam.code), ...venuesFor(fixture.aiTeam.code)];
-  let venueId = venues.some((v) => v.id === props.venueId) ? props.venueId : venues[0].id;
   let ball = BALLS.some(([b]) => b === props.ball) ? props.ball : 'white';
 
   const screen = el('section', { className: 'screen screen--setup' });
   root.append(screen);
 
-  function segmented(label, options, current, onPick, mod = '') {
-    return el('fieldset', { className: `segmented${mod ? ` segmented--${mod}` : ''}` },
+  function segmented(label, options, current, onPick) {
+    return el('fieldset', { className: 'segmented' },
       el('legend', {}, label),
       el('div', { className: 'segmented__opts', role: 'radiogroup', 'aria-label': label },
         options.map(([value, text]) => el('button', {
@@ -46,10 +42,6 @@ export function mount(root, props, navigate) {
         el('p', { className: 'versus__names' }, `${fixture.userTeam.name} v ${fixture.aiTeam.name}`),
         segmented('Overs per side', OVERS.map((o) => [o, `${o} overs`]), overs, (v) => { overs = v; }),
         segmented('Difficulty', DIFFICULTY, difficulty, (v) => { difficulty = v; }),
-        segmented('Venue', venues.map((v) => [v.id, () => [
-          el('span', { className: 'seg__main' }, v.name),
-          el('span', { className: 'seg__sub' }, v.nation === fixture.userTeam.code ? 'Home' : 'Away'),
-        ]]), venueId, (v) => { venueId = v; }, 'grid'),
         segmented('Ball', BALLS.map(([b, text]) => [b, () => [
           el('span', { className: `ball-dot ball-dot--${b}`, 'aria-hidden': 'true' }), text,
         ]]), ball, (v) => { ball = v; }),
@@ -64,8 +56,9 @@ export function mount(root, props, navigate) {
         el('button', {
           type: 'button',
           className: 'btn btn--primary',
-          onClick: () => navigate('toss', { fixture, rng, overs, difficulty, venueId, ball }),
-        }, 'Next: toss')),
+          // venueId rides along so Back from the Venue screen keeps the pick.
+          onClick: () => navigate('venue', { ...props, fixture, rng, overs, difficulty, ball }),
+        }, 'Next: venue')),
     );
   }
 

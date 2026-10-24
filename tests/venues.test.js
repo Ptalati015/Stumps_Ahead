@@ -13,7 +13,8 @@ test('two venues per nation, unique ids and names', () => {
 
 test('every venue has a city, three stand colours and a sky tint', () => {
   for (const v of VENUES) {
-    assert.ok(v.name && v.city, v.id);
+    assert.ok(v.name && v.city && v.tagline, v.id);
+    assert.ok(v.tagline.length <= 70 && !/["“”]/.test(v.tagline), `${v.id} tagline: one short line, no quotes`);
     assert.equal(v.stands.length, 3, v.id);
     for (const c of [...v.stands, v.sky]) assert.match(c, /^#[0-9a-f]{6}$/i, v.id);
     assert.equal(getVenue(v.id), v);

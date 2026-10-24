@@ -8,6 +8,7 @@ const SCREENS = {
   menu: () => import('./ui/screens/menu.js'),
   teamSelect: () => import('./ui/screens/teamSelect.js'),
   setup: () => import('./ui/screens/setup.js'),
+  venue: () => import('./ui/screens/venue.js'),
   toss: () => import('./ui/screens/toss.js'),
   play: () => import('./ui/screens/play.js'),
   inningsBreak: () => import('./ui/screens/inningsBreak.js'),
