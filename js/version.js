@@ -1,2 +1,2 @@
 // App version, semantic versioning. Bumped only by release PRs (SPEC 13.6).
-export const VERSION = '1.3.1';
+export const VERSION = '1.4.0';

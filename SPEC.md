@@ -652,3 +652,139 @@ Ayush's PR merges first. Karen bumps `VERSION` to `1.3.0` and adds a CHANGELOG e
 4. **Batting input:** there is no swipe-to-hit, no aim arrow and no Aerial toggle. Every shot button still works and the hit line still shows. Moving the batter by ◀ ▶ and by drag works before release.
 5. **Compatibility:** seeded results without the `side` field match v1.2.0, apart from the intended wide-rule change.
 6. **Security and quality:** no new `innerHTML` or dependencies, and removed handlers are gone from `unmount`. All tests, the QA scripts and the smoke test at 375 px pass.
+
+## 16. v1.4.0: batting direction pad, milestones and richer commentary, pause sheet
+
+Talati picked the Researcher's v1.4.0 package on 2026-10-24 without sound and haptics, which go back to the backlog. Full research: `/mnt/project-files/researcher/what-to-build-next-v1.3.1.md`. What is shipped and what is next is tracked in `ROADMAP.md`.
+
+Everything in this release is additive. With the pad left on Auto, a fixed seed gives exactly the same scores as v1.3.1.
+
+### 16.1 Batting direction pad (Ayush engine and play.js, Joel CSS)
+
+This is the "better option later" Talati asked for when the swipe and the yellow arrow were removed in v1.3.0.
+
+**Control:** a 3×3 direction pad sits on the left of the batting controls and the shot buttons sit on the right. The move ◀ ▶ buttons stay. The pad shows the field from the batter's view:
+
+| | | |
+|---|---|---|
+| Cover | Straight | Mid-wicket |
+| Point | **Auto** | Square leg |
+| Third man | (empty) | Fine leg |
+
+That table is for a right-hander, where the off side is on the left of the pad. For a left-hander the pad mirrors left to right so the off side always matches the screen; use the same `screenLeftSign` as the move buttons. Each cell is at least 44 × 44 CSS px. The selected cell is highlighted, and every cell has an `aria-label` and `aria-pressed`.
+
+**Behaviour:**
+- **Auto** is the default. It means "each shot's own default direction" (`DEFAULT_AIM`), which is exactly today's game.
+- The choice stays selected between balls. It resets to Auto when a new batter comes in or a new innings starts.
+- It can be changed at any time before the shot is played, including after release.
+- Keyboard: the numpad layout 7 8 9 / 4 5 6 / 1 3 maps to the cells, and 5 is Auto. The shot keys D F P C L are unchanged.
+- There is no live overlay of the direction on the pitch. After the shot, the existing hit line on the field cam shows where the ball went.
+
+**Sector angles** (batter-relative, + = leg side, as in `BatInput.aimDeg`): Straight 0, Mid-wicket +45, Square leg +90, Fine leg +145, Cover -45, Point -90, Third man -145.
+
+**Engine:** `aimDeg` is already in `BatInput`. Add `BatInput.aimSource: 'auto'|'pad'`; leaving it out means 'auto'. Each shot can only go where that shot can go, so the pad's angle is clamped to the shot's arc:
+
+| Shot | Arc (deg) |
+|---|---|
+| Defend | -30 to +30 |
+| Drive | -70 to +60 |
+| Cut | -150 to -40 |
+| Pull | +40 to +160 |
+| Loft | -90 to +90 |
+
+For example, Cut with Fine leg selected goes to the nearest point of the cut arc (-40), and Pull with Cover selected goes to +40.
+
+**Playing against the line** (only when `aimSource` is 'pad'): aiming leg side (more than +30) at a ball on an off line, or off side (less than -30) at a ball on a leg line, moves 10% of the perfect/good weight to edges for that ball. Aiming with the line has no bonus. An Auto ball never takes this penalty.
+
+**AI batting:** no change.
+
+### 16.2 Milestones and richer commentary (Joel data, Ayush engine and play.js)
+
+**Lines (Joel):** a new `js/data/commentary.js` exports `COMMENTARY`, an object of arrays of template strings. Placeholders are `{batter}`, `{bowler}`, `{fielder}`, `{how}` (the shot words), `{where}` (a field area from the ball's angle, for example "to cover") and `{n}` (a number). It needs at least 4 lines for each of these keys:
+- `dot_defend`, `dot_fielded`, `beaten`, `leave`, `single`, `two`, `three`, `four`, `six`;
+- `bowled`, `caught`, `caught_behind`, `lbw`, `runout`;
+- `wide`, `noball`;
+- `fifty`, `hundred`, `threefor`, `fivefor`, `hattrick_ball`, `hattrick`, `maiden`, `partnership50`;
+- `last_over` ("{n} needed off the last over"), `won_it`.
+
+Every line is plain text with no HTML, uses only fictional player names through the placeholders, and has no real players or brands. The existing `driveWords()` wording stays as the source of `{how}` for drives.
+
+**Engine (Ayush):** `commentaryFor` picks from `COMMENTARY`.
+- **Seeds stay the same:** line picks use their own stream, `forkRng(state.rngState, SALT_COMMENT)`, as `shotFlight` does. The existing `rng.pick` on the match stream is still drawn, so scores are unchanged for the same seed and inputs.
+- **No repeats:** the same line is not used twice in a row within an innings for the same key.
+- **Fielded dots:** use `{where}` ("Driven straight to cover."), so "Dot ball." no longer dominates.
+- **Milestones:** `playBall` returns `ball.milestones: Array<{kind, playerId}>`, empty most balls. Each milestone fires once, on the ball it happens:
+  - `fifty` and `hundred`: the batter's runs cross 50 or 100.
+  - `threefor` and `fivefor`: the bowler's wickets reach 3 or 5 (run outs don't count, as on the card).
+  - `hattrick_ball`: the bowler's last two legal balls, even across overs, were both wickets credited to the bowler. This fires on the ball before it is bowled; return it from `previewDelivery` as `delivery.hattrickBall: true` so the play screen can say it during the run-up.
+  - `hattrick`: the third of those wickets.
+  - `maiden`: an over ends with 0 runs off the bat and no wides or no-balls.
+  - `partnership50`: the current pair's runs, extras included, cross 50.
+  - The situational lines `last_over` (second innings, start of the final over, with runs still needed) and `won_it` (the winning runs) come out as `ball.note` / `delivery.note` strings.
+- **One line per ball:** the ball's commentary is its normal line, followed by at most one milestone or situational line.
+
+**Play screen (Ayush):**
+- For `fifty`, `hundred`, `fivefor` and `hattrick`, show a short banner ("FIFTY! <name>") in the existing `pl-flash` element after the ball's own flash, for about 1.5 s.
+- Joel styles it as `.pl-flash-milestone` in the batting team's colours.
+- The hat-trick ball shows "On a hat-trick!" in the commentary during the run-up.
+
+### 16.3 In-match pause sheet (Joel component, Ayush play.js)
+
+**Today:** you cannot see the full scorecard or leave a match until the innings ends.
+
+**Button:** a pause button (⏸, `aria-label="Pause"`) on the play header, at least 44 × 44 px.
+
+**Sheet (Joel, `js/ui/components/pauseSheet.js`):** `openPauseSheet(root, state, { onResume, onQuit })` returns a `close()` function. It is a bottom sheet over the play screen with:
+- the current innings' full scorecard, reusing `scorecard()`, plus the first innings when in the second;
+- a short "How to play" (move, direction pad, shot buttons; bowling ring, meter, variations, side);
+- **Resume**;
+- **Quit to menu**, which asks "Quit this match? It won't be saved." with Cancel and Quit.
+
+Requirements:
+- Focus moves into the sheet when it opens, and Escape resumes.
+- It is built with `el()` and `textContent` only.
+- It scrolls inside itself at 375 px.
+
+**Timing (Ayush):** pausing happens between balls so no animation or timing window is cut.
+- Tapping pause during a delivery queues it. The sheet opens as soon as that ball settles, before the next run-up or bowling controls.
+- Tapping it between balls opens it at once.
+- While the sheet is open, no ball starts and no timers or keys reach the play screen.
+- Resume continues exactly where it was.
+- Quit calls `navigate('menu')` and `unmount` clears every timer, frame and key handler, so nothing fires after leaving.
+- The match state is simply dropped (no storage).
+
+### 16.4 File ownership for this phase
+
+| Ayush | Joel |
+|---|---|
+| `js/engine/outcomes.js` (aim clamp, against-the-line, `commentaryFor`), `match.js` (milestones, `SALT_COMMENT`, hat-trick preview), engine tests | `js/data/commentary.js` + a test that every key has ≥ 4 lines and no `<` or `>` |
+| `js/ui/screens/play.js` (pad behaviour and keys, milestone banners, pause queueing and wiring) | `js/ui/components/pauseSheet.js` |
+| `js/types.js` (`aimSource`, `ball.milestones`, `ball.note`, `delivery.hattrickBall`) | `css/play.css` (pad grid and mirroring, pause button and sheet, `.pl-flash-milestone`) |
+
+Joel's `commentary.js` should merge first or alongside Ayush's PR, since the engine imports it. Until then Ayush can use a stub with the same keys. Karen bumps `VERSION` to `1.4.0`, adds the CHANGELOG entry and updates `ROADMAP.md` in the spec PR, which merges last.
+
+### 16.5 Done when (Violet and Mark)
+
+1. **Pad:**
+   - every cell works for right- and left-handers, with off side on the correct screen side;
+   - the selection persists between balls and resets for a new batter or innings;
+   - keys 1 to 9 work, and cells are ≥ 44 px at 375 px wide;
+   - every shot × sector lands inside that shot's arc (seeded test).
+2. **Seed compatibility:** with Auto (no `aimSource`), a 270-match seeded run gives the same scores as v1.3.1. Commentary text is allowed to differ.
+3. **Against the line:** over 2,000 seeded balls, the pad's against-the-line aim raises edges by about 10% of perfect/good, and Auto and with-the-line are unchanged.
+4. **Commentary:**
+   - every key has at least 4 lines;
+   - no line repeats back to back within an innings;
+   - "Dot ball." is no longer the line for most dots;
+   - placeholders are always filled, with no `{` in output.
+5. **Milestones:**
+   - seeded tests for fifty, hundred, three-for, five-for, hat-trick ball, hat-trick (including across overs), maiden and 50 partnership;
+   - each fires exactly once;
+   - run outs don't count toward bowler milestones.
+6. **Pause:**
+   - opens between balls;
+   - queues if tapped mid-ball;
+   - nothing moves or times out while open;
+   - Resume continues;
+   - Quit asks first, goes to the menu, and leaves no timers running (check the console after quitting mid-innings).
+7. **Security and quality:** no `innerHTML`, no new dependencies or assets, no storage, and all new handlers are removed in `unmount`. All tests, the QA scripts and the smoke test at 375 px pass. Check the real game on a phone-sized viewport too, not only the tests.
