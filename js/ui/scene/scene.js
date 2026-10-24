@@ -1,33 +1,40 @@
-// Match scene for the play screen: a broadcast-style view from behind the
-// bowler (pitch cam) and a top-down ground view for where the ball goes
-// (field cam). Purely visual: it never decides an outcome, it only acts out
-// the BallResult the engine returns. Cosmetic choices (exact shot direction,
-// which fielder chases) use Math.random, never the match rng.
+// Match scene for the play screen: a broadcast-style pitch cam and a top-down
+// ground view for where the ball goes (field cam). Purely visual: it never
+// decides an outcome, it only acts out the BallResult the engine returns.
+// Where the engine gives no direction or distance, cosmetic choices use
+// Math.random, never the match rng.
 import { svg, set, pts, lerp, clamp01, easeOut, easeInOut } from './svg.js';
-import { createPerson, createBatter } from './figures.js';
+import { createPerson, createBatter3D, yawLocal } from './figures.js';
 
 // ---- Pitch cam projection --------------------------------------------------
-// World: x across the pitch (metres, + is the leg side of a right-hander,
-// screen right), y up, z along the pitch from the batter's stumps (0) to the
-// bowler's stumps (20.12). The camera sits behind the bowler, looking down the
-// pitch with a long lens, like a TV broadcast.
+// World: x across the pitch (metres, + is the leg side of a right-hander),
+// y up, z along the pitch from the striker's stumps (0) to the bowler's
+// stumps (20.12). Two cameras:
+//   bowling: behind the bowler with a long lens, like a TV broadcast.
+//   batting: low behind the striker looking at the bowler, like EA Cricket
+//            and Real Cricket. The view is turned round, so +x is screen left.
 const VB_W = 400;
 const VB_H = 300;
 const CX = VB_W / 2;
-const FOCAL = 1700;
-const CAM_Z = 50;
-const CAM_H = 4.2;
-const HORIZON = -30;
+const CAMS = {
+  bowling: { z: 50, h: 4.2, focal: 1700, horizon: -30, dir: -1 },
+  batting: { z: -11, h: 4.4, focal: 430, horizon: 50, dir: 1 },
+};
+let cam = CAMS.bowling;
 
 function project(x, y, z) {
-  const s = FOCAL / Math.max(0.5, CAM_Z - z);
-  return [CX + x * s, HORIZON + (CAM_H - y) * s, s];
+  const s = cam.focal / Math.max(0.5, cam.dir * (z - cam.z));
+  return [CX - cam.dir * x * s, cam.horizon + (cam.h - y) * s, s];
 }
+const camDepth = (z) => cam.dir * (z - cam.z);
 
 const STUMP_X = [-0.114, 0, 0.114];
 const STUMP_H = 0.71;
 const CREASE_Z = 1.22;
-const BATTER = { x: 0.42, z: 0.95 };
+// The striker's body stands this far to the leg side of middle stump.
+const GUARD_X = 0.42;
+const BATTER_Z = 0.95;
+const MOVE_LIMIT = 0.6;
 const RELEASE = { x: -0.25, y: 2.2, z: 19.4 };
 const BOUNCE_Z = { yorker: 1.7, full: 3.6, good: 6.6, short: 10.2 };
 const ARRIVE_H = { yorker: 0.12, full: 0.45, good: 0.85, short: 1.35 };
@@ -40,11 +47,14 @@ const DELIVERY_STRIDE = { x: -0.45, z: 19.9 };
 const FOLLOW_END = { x: -1.7, z: 16.6 };
 
 // ---- Field cam ---------------------------------------------------------
-// Top-down, same orientation: the batter at the top, the bowler at the bottom,
-// off side on the left. Field units are metres from the middle of the pitch.
+// Top-down and lined up with the pitch cam: with the bowling camera the
+// striker is at the top; with the batting camera the view turns round so the
+// striker is at the bottom. Field units are metres from the middle of the
+// pitch, X positive on a right-hander's leg side.
 const FS = 1.6;
 const ROPE = 65;
-const fpos = (X, Y) => [CX + X * FS, VB_H / 2 + Y * FS];
+let fieldFlip = 1;
+const fpos = (X, Y) => [CX + X * FS * fieldFlip, VB_H / 2 + Y * FS * fieldFlip];
 const STRIKER_END = -10.06;
 const BOWLER_END = 10.06;
 // Fielders as [angle, distance] from the striker. Angle 0 is straight back
@@ -54,17 +64,68 @@ const FIELD = [
 ];
 const SHOT_ANGLES = { defend: [-25, 25], drive: [-55, 15], loft: [-35, 35], pull: [60, 115], cut: [-120, -70], leave: [-10, 10] };
 
-// Batting animation keyframes in ms from the tap. Contact happens at about 70 ms.
-const BACKLIFT = { a: -135, lean: 0, stride: 0, crouch: 0.2 };
-const STANCE = { a: 18, lean: 0, stride: 0, crouch: 0.15 };
-const SWINGS = {
-  defend: [{ ms: 70, a: -8, lean: 0.7, stride: 0.9, crouch: 0.3 }, { ms: 600, a: -6, lean: 0.7, stride: 0.9, crouch: 0.3 }],
-  drive: [{ ms: 70, a: 0, lean: 0.6, stride: 1, crouch: 0.2 }, { ms: 380, a: 150, lean: 0.4, stride: 1, crouch: 0.2 }, { ms: 800, a: 150, lean: 0.4, stride: 1, crouch: 0.2 }],
-  loft: [{ ms: 70, a: 0, lean: 0.3, stride: 0.7, crouch: 0.1 }, { ms: 420, a: 222, lean: -0.2, stride: 0.7, crouch: 0.05 }, { ms: 800, a: 222, lean: -0.2, stride: 0.7, crouch: 0.05 }],
-  pull: [{ ms: 70, a: -95, lean: -0.3, stride: -0.4, crouch: 0.15 }, { ms: 400, a: -232, lean: -0.3, stride: -0.4, crouch: 0.15 }, { ms: 800, a: -232, lean: -0.3, stride: -0.4, crouch: 0.15 }],
-  cut: [{ ms: 70, a: 85, lean: 0.2, stride: -0.3, crouch: 0.25 }, { ms: 380, a: 58, lean: 0.2, stride: -0.3, crouch: 0.25 }, { ms: 800, a: 58, lean: 0.2, stride: -0.3, crouch: 0.25 }],
-  leave: [{ ms: 160, a: -200, lean: -0.2, stride: 0.4, crouch: 0.1 }, { ms: 700, a: -200, lean: -0.2, stride: 0.4, crouch: 0.1 }],
+// Batting poses in the batter-local frame (see figures.js): hands position,
+// bat direction from the hands to the toe, the way the bat face points, feet
+// as [a, b], and body shape. Shot keyframes are ms from the swing call;
+// contact is at about 70 ms.
+const STANCE = {
+  hands: [0.24, 0.8, 0.0], dir: [0.17, -0.98, -0.07], face: [0, 0, 1],
+  front: [0, 0.3], back: [0, -0.12], crouch: 0.15, turn: 0, lean: 0.1, lift: [0, 0],
 };
+const BACKLIFT = {
+  hands: [0.1, 1.15, -0.14], dir: [0.15, 0.55, -0.82], face: [0.6, 0, -0.3],
+  front: [0, 0.34], back: [0, -0.12], crouch: 0.2, turn: 0.05, lean: 0.1, lift: [0, 0],
+};
+const pose = (o) => ({ ...STANCE, ...o });
+const SWINGS = {
+  defend: [
+    { ms: 70, ...pose({ hands: [0.34, 0.78, 0.4], dir: [0.08, -0.98, 0.14], face: [0, 0.1, 1], front: [0.04, 0.62], crouch: 0.3, turn: 0.15, lean: 0.6 }) },
+    { ms: 650, ...pose({ hands: [0.34, 0.78, 0.4], dir: [0.08, -0.98, 0.14], face: [0, 0.1, 1], front: [0.04, 0.62], crouch: 0.3, turn: 0.15, lean: 0.6 }) },
+  ],
+  drive: [
+    { ms: 70, ...pose({ hands: [0.32, 0.72, 0.44], dir: [0.1, -0.97, 0.22], face: [0, 0.1, 1], front: [0.05, 0.66], crouch: 0.3, turn: 0.25, lean: 0.55 }) },
+    { ms: 380, ...pose({ hands: [0.06, 1.5, 0.42], dir: [-0.3, 0.72, -0.62], face: [-0.2, 0.3, 1], front: [0.05, 0.66], crouch: 0.2, turn: 0.6, lean: 0.4 }) },
+    { ms: 850, ...pose({ hands: [0.06, 1.5, 0.42], dir: [-0.3, 0.72, -0.62], face: [-0.2, 0.3, 1], front: [0.05, 0.66], crouch: 0.2, turn: 0.6, lean: 0.4 }) },
+  ],
+  loft: [
+    { ms: 70, ...pose({ hands: [0.3, 0.82, 0.38], dir: [0.05, -0.88, 0.47], face: [0, 0.45, 1], front: [0.05, 0.55], crouch: 0.2, turn: 0.35, lean: 0.2 }) },
+    { ms: 420, ...pose({ hands: [-0.04, 1.95, 0.18], dir: [-0.22, 0.42, -0.88], face: [0, 1, 0.2], front: [0.05, 0.55], crouch: 0.05, turn: 0.85, lean: -0.3 }) },
+    { ms: 900, ...pose({ hands: [-0.04, 1.95, 0.18], dir: [-0.22, 0.42, -0.88], face: [0, 1, 0.2], front: [0.05, 0.55], crouch: 0.05, turn: 0.85, lean: -0.3 }) },
+  ],
+  pull: [
+    { ms: 70, ...pose({ hands: [0.28, 1.15, 0.15], dir: [0.55, 0.05, 0.84], face: [-0.7, 0, 0.7], front: [0.06, 0.05], back: [0.14, -0.38], crouch: 0.1, turn: 0.7, lean: -0.1 }) },
+    { ms: 400, ...pose({ hands: [-0.1, 1.25, -0.05], dir: [-0.75, 0.3, -0.6], face: [-0.3, 0, -1], front: [0.06, 0.05], back: [0.14, -0.38], crouch: 0.1, turn: 0.9, lean: -0.15 }) },
+    { ms: 850, ...pose({ hands: [-0.1, 1.25, -0.05], dir: [-0.75, 0.3, -0.6], face: [-0.3, 0, -1], front: [0.06, 0.05], back: [0.14, -0.38], crouch: 0.1, turn: 0.9, lean: -0.15 }) },
+  ],
+  cut: [
+    { ms: 70, ...pose({ hands: [0.45, 1.02, 0.02], dir: [0.82, -0.3, 0.48], face: [0.4, 0, -0.9], front: [0.04, 0.16], back: [0.18, -0.26], crouch: 0.3, turn: 0.2, lean: 0.25 }) },
+    { ms: 380, ...pose({ hands: [0.42, 1.12, -0.22], dir: [0.55, 0.2, -0.81], face: [0.2, 0, -1], front: [0.04, 0.16], back: [0.18, -0.26], crouch: 0.3, turn: 0.25, lean: 0.25 }) },
+    { ms: 850, ...pose({ hands: [0.42, 1.12, -0.22], dir: [0.55, 0.2, -0.81], face: [0.2, 0, -1], front: [0.04, 0.16], back: [0.18, -0.26], crouch: 0.3, turn: 0.25, lean: 0.25 }) },
+  ],
+  leave: [
+    { ms: 160, ...pose({ hands: [-0.05, 1.45, -0.05], dir: [-0.15, 0.7, -0.7], face: [0, 0, 1], front: [0, 0.4], turn: 0.1, lean: -0.1 }) },
+    { ms: 700, ...pose({ hands: [-0.05, 1.45, -0.05], dir: [-0.15, 0.7, -0.7], face: [0, 0, 1], front: [0, 0.4], turn: 0.1, lean: -0.1 }) },
+  ],
+};
+// The direction each swing plays toward by default (batter-relative degrees).
+const SWING_AIM = { defend: 0, drive: -20, loft: 0, pull: 80, cut: -85, leave: 0 };
+
+function lerpPose(a, b, u) {
+  const v = (p, q) => p.map((x, i) => lerp(x, q[i], u));
+  return {
+    hands: v(a.hands, b.hands), dir: v(a.dir, b.dir), face: v(a.face, b.face), front: v(a.front, b.front),
+    back: v(a.back, b.back), lift: v(a.lift, b.lift), crouch: lerp(a.crouch, b.crouch, u), turn: lerp(a.turn, b.turn, u), lean: lerp(a.lean, b.lean, u),
+  };
+}
+
+// Turn a swing toward the aimed direction: the bat path rotates about the
+// batter, by part of the gap between the aim and the swing's own direction.
+function aimSwing(frames, shot, aimDeg) {
+  if (aimDeg == null) return frames;
+  const delta = Math.max(-45, Math.min(45, (aimDeg - SWING_AIM[shot]) * 0.6));
+  if (!delta) return frames;
+  return frames.map((f) => ({ ...f, hands: yawLocal(f.hands, delta), dir: yawLocal(f.dir, delta), face: yawLocal(f.face, delta) }));
+}
 
 const rand = (a, b) => a + Math.random() * (b - a);
 
@@ -75,18 +136,18 @@ function shade(hex, f) {
   return `rgb(${r},${g},${b})`;
 }
 
-/** x position of a delivery at the batting crease. */
-function lineX(delivery) {
-  if (delivery.extra === 'wide') return delivery.line === 'leg' ? 0.85 : -0.95;
-  return LINE_AT_CREASE[delivery.line] ?? 0;
+/** x position of a delivery at the batting crease. off = -1 for a right-hander, +1 for a left-hander. */
+function lineX(delivery, off) {
+  if (delivery.extra === 'wide') return delivery.line === 'leg' ? -0.85 * off : 0.95 * off;
+  return -(LINE_AT_CREASE[delivery.line] ?? 0) * off;
 }
 
 /** Ball position over time (seconds since release) for a delivery. */
-function deliveryPath(delivery) {
+function deliveryPath(delivery, off = -1) {
   const T = delivery.travelMs / 1000;
   const zb = BOUNCE_Z[delivery.length] ?? BOUNCE_Z.good;
   const hA = ARRIVE_H[delivery.length] ?? ARRIVE_H.good;
-  const xA = lineX(delivery);
+  const xA = lineX(delivery, off);
   const vz = (RELEASE.z - CREASE_Z) / T;
   const tb = (RELEASE.z - zb) / vz;
   const tA = T - tb;
@@ -114,37 +175,46 @@ function deliveryPath(delivery) {
  * @returns scene API, see the return statement.
  */
 export function createScene(host) {
+  cam = CAMS.bowling;
+  fieldFlip = 1;
   const root = svg('svg', { class: 'sc', viewBox: '100 8 200 252', preserveAspectRatio: 'xMidYMid meet', 'aria-hidden': 'true' });
   host.prepend(root);
   buildDefs(root);
 
   // ---- Pitch cam ----
+  // bg: rebuilt when the camera changes. actorLayer: people, stumps and the
+  // ball, re-sorted every frame so nearer things paint over farther ones.
   const pitchCam = svg('g', { class: 'sc-cam' }, root);
-  drawPitchCamBackground(pitchCam);
+  const bgLayer = svg('g', {}, pitchCam);
   const markerLayer = svg('g', {}, pitchCam);
   const marker = svg('ellipse', { class: 'sc-marker', fill: 'rgba(255,210,63,0.28)', stroke: '#ffd23f', 'stroke-width': 1.4 }, markerLayer);
-  const farLayer = svg('g', {}, pitchCam);
-  const farStumps = makeStumps(pitchCam, 0);
-  const ballBehind = svg('g', {}, pitchCam);
-  const batterLayer = svg('g', {}, pitchCam);
-  const ballFront = svg('g', {}, pitchCam);
-  makeStumps(pitchCam, 20.12);
-  const nearLayer = svg('g', {}, pitchCam);
+  const guardMark = svg('line', { stroke: '#ffd23f', 'stroke-linecap': 'round' }, markerLayer);
+  const actorLayer = svg('g', {}, pitchCam);
+  const aimLayer = svg('g', { class: 'sc-aim' }, pitchCam);
+  const aimPath = svg('polyline', { fill: 'none', stroke: '#ffd23f', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, aimLayer);
+  const aimHead = svg('polygon', { fill: '#ffd23f' }, aimLayer);
+  aimLayer.setAttribute('visibility', 'hidden');
 
-  const ballG = svg('g', {}, ballFront);
+  const ballG = svg('g', {}, actorLayer);
   const ballShadow = svg('ellipse', { fill: 'rgba(0,0,0,0.35)' }, ballG);
   const ballEl = svg('circle', { fill: 'url(#sc-ball)', stroke: '#5a0a10', 'stroke-width': 0.4 }, ballG);
+  const ballActor = { g: ballG, z: 10 };
 
   // ---- Field cam ----
   const fieldCam = svg('g', { class: 'sc-cam sc-off' }, root);
   drawFieldCamBackground(fieldCam);
-  const fieldStumps = [STRIKER_END, BOWLER_END].map((Y) => {
+  const fieldStumps = [STRIKER_END, BOWLER_END].map(() => svg('rect', { width: 4, height: 2, fill: '#f5f0e1' }, fieldCam));
+  const placeFieldStumps = () => [STRIKER_END, BOWLER_END].forEach((Y, i) => {
     const [x, y] = fpos(0, Y);
-    return svg('rect', { x: x - 2, y: y - 1, width: 4, height: 2, fill: '#f5f0e1' }, fieldCam);
+    set(fieldStumps[i], { x: x - 2, y: y - 1 });
   });
+  placeFieldStumps();
   const fieldersG = svg('g', {}, fieldCam);
   const runnersG = svg('g', {}, fieldCam);
-  const fTrail = svg('line', { stroke: 'rgba(255,255,255,0.5)', 'stroke-width': 1.2, 'stroke-linecap': 'round', 'stroke-dasharray': '2 3' }, fieldCam);
+  // The hit line: the ball's path along the ground, or for an aerial shot its
+  // flight (arc) with the shadow's track on the grass.
+  const hitShadow = svg('polyline', { fill: 'none', stroke: 'rgba(0,0,0,0.35)', 'stroke-width': 1.2, 'stroke-linecap': 'round', 'stroke-dasharray': '2 3' }, fieldCam);
+  const hitLine = svg('polyline', { fill: 'none', stroke: 'rgba(255,255,255,0.75)', 'stroke-width': 1.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, fieldCam);
   const fBallShadow = svg('ellipse', { fill: 'rgba(0,0,0,0.35)', rx: 2.6, ry: 1.5 }, fieldCam);
   const fBall = svg('circle', { r: 3, fill: 'url(#sc-ball)', stroke: '#fff', 'stroke-width': 0.6 }, fieldCam);
 
@@ -153,12 +223,21 @@ export function createScene(host) {
   let bowler = null;
   let keeper = null;
   let umpire = null;
-  let slips = [];
   let fielders = [];
   let runners = [];
   let keeperZ = -11;
-  let batterPose = { ...STANCE };
   let bowlerPos = { ...RUN_START };
+  let lastBallOpts = null;
+  let actors = [];
+  let strikerStumps = null;
+
+  // Striker: handedness, guard offset (+ toward the leg side) and pose.
+  let camMode = 'bowling';
+  let batSide = 'R';
+  let off = -1; // world x sign of the off side: -1 right-handed, +1 left-handed
+  let batX = GUARD_X;
+  let batOffset = 0;
+  let batPose = { ...STANCE };
 
   // ---- Animation loop ----
   const tracks = new Map();
@@ -168,6 +247,7 @@ export function createScene(host) {
   const loop = (now) => {
     if (!alive) return;
     for (const [key, fn] of tracks) if (fn(now) === false) tracks.delete(key);
+    sortActors();
     raf = requestAnimationFrame(loop);
   };
   raf = requestAnimationFrame(loop);
@@ -184,10 +264,25 @@ export function createScene(host) {
     });
   };
 
+  // Paint actors far to near for the current camera.
+  let paintOrder = [];
+  function sortActors() {
+    const list = actors.filter((a) => a.g.parentNode === actorLayer).sort((p, q) => camDepth(q.z) - camDepth(p.z));
+    if (list.length === paintOrder.length && list.every((a, i) => a === paintOrder[i])) return;
+    for (const a of list) actorLayer.append(a.g);
+    paintOrder = list;
+  }
+  function addActor(g, z) {
+    const a = { g, z };
+    actors.push(a);
+    return a;
+  }
+
   // ---- Drawing helpers ----
   function placePerson(fig, x, z) {
     const [sx, sy, s] = project(x, 0, z);
     fig.place(sx, sy, s);
+    if (fig.actor) fig.actor.z = z;
   }
 
   function drawBall(p) {
@@ -196,24 +291,37 @@ export function createScene(host) {
     const r = Math.max(1.5, 0.036 * s * 1.7);
     set(ballEl, { cx: sx, cy: sy, r });
     set(ballShadow, { cx: gx, cy: gy, rx: r * 1.1, ry: r * 0.45, opacity: Math.max(0.15, 1 - p.y / 3) });
-    const parent = p.z < BATTER.z + 0.05 ? ballBehind : ballFront;
-    if (ballG.parentNode !== parent) parent.append(ballG);
-    ballG.setAttribute('visibility', 'visible');
+    ballActor.z = p.z;
+    // In the batting camera the ball passes the lens behind the striker.
+    const gone = camMode === 'batting' && p.z < cam.z + 2.5;
+    ballG.setAttribute('visibility', gone ? 'hidden' : 'visible');
   }
   function hideBall() {
     ballG.setAttribute('visibility', 'hidden');
   }
 
-  function setBatter(p) {
-    batterPose = { ...batterPose, ...p };
-    batter.pose(batterPose);
+  const camPos = () => [0, cam.h, cam.z];
+  function drawBatter() {
+    if (!batter) return;
+    batter.draw({ x: batX, z: BATTER_Z, fx: off, pose: batPose }, project, camPos());
+    batter.actor.z = BATTER_Z;
+  }
+  function setPose(p) {
+    batPose = p;
+    drawBatter();
+  }
+  // Where the bat is grounded at guard, on the popping crease.
+  function drawGuardMark() {
+    const gx = batX + off * 0.38;
+    const [x0, y0, s] = project(gx, 0, CREASE_Z - 0.12);
+    const [x1, y1] = project(gx, 0, CREASE_Z + 0.12);
+    set(guardMark, { x1: x0, y1: y0, x2: x1, y2: y1, 'stroke-width': Math.max(1.2, 0.05 * s) });
   }
 
   // Pose the batter through ms-based keyframes from the current pose.
   function animateBatter(frames) {
     const start = performance.now();
-    const from = { ms: 0, ...batterPose };
-    const all = [from, ...frames];
+    const all = [{ ms: 0, ...batPose }, ...frames];
     track('batter', (now) => {
       const ms = now - start;
       let i = 1;
@@ -221,12 +329,13 @@ export function createScene(host) {
       const a = all[i - 1];
       const b = all[i];
       const u = easeInOut(clamp01((ms - a.ms) / Math.max(1, b.ms - a.ms)));
-      setBatter({ a: lerp(a.a, b.a, u), lean: lerp(a.lean, b.lean, u), stride: lerp(a.stride, b.stride, u), crouch: lerp(a.crouch, b.crouch, u) });
+      setPose(lerpPose(a, b, u));
       return ms < all[all.length - 1].ms;
     });
   }
 
   function personTween(key, fig, from, to, ms, extra = () => ({})) {
+    if (!fig) return;
     const start = performance.now();
     track(key, (now) => {
       const u = easeInOut(clamp01((now - start) / ms));
@@ -243,59 +352,75 @@ export function createScene(host) {
   }
 
   // ---- Public: set up for a new ball ----
-  function newBall({ batColors, bowlColors, spinner }) {
+  function newBall(opts) {
+    lastBallOpts = opts;
+    const { batColors, bowlColors, spinner } = opts;
     for (const key of [...tracks.keys()]) tracks.delete(key);
     setCam('pitch');
     hideBall();
     hideFieldBall();
+    showAim(null);
     marker.setAttribute('visibility', 'hidden');
-    farStumps.reset();
-    fieldStumps.forEach((s) => s.setAttribute('fill', '#f5f0e1'));
+    fieldStumps.forEach((st) => st.setAttribute('fill', '#f5f0e1'));
+    flight = null;
 
     const batKit = { shirt: batColors.primary, trousers: shade(batColors.primary, -0.45), cap: shade(batColors.primary, -0.25), trim: batColors.secondary };
     const bowlKit = { shirt: bowlColors.primary, trousers: shade(bowlColors.primary, -0.45), cap: bowlColors.secondary, trim: bowlColors.secondary };
+    const batting = camMode === 'batting';
+    // People who face the camera: front view, mirrored so their right arm is on screen left.
+    const facing = (towardCamera) => (towardCamera ? { view: 'front', mirror: true } : { view: 'back' });
 
-    farLayer.replaceChildren();
-    batterLayer.replaceChildren();
-    nearLayer.replaceChildren();
-    keeperZ = spinner ? -1.4 : -11;
-    slips = spinner ? [] : [[-1.7, -12], [-2.8, -12.4]].map(([x, z]) => {
-      const f = createPerson(farLayer, { ...bowlKit, view: 'front' });
+    actors = [];
+    paintOrder = [];
+    actorLayer.replaceChildren(ballG);
+    actors.push(ballActor);
+    strikerStumps = makeStumps(actorLayer, 0);
+    addActor(strikerStumps.g, 0);
+    addActor(makeStumps(actorLayer, 20.12).g, 20.12);
+
+    const person = (kit, x, z, extra, poseArgs) => {
+      const f = createPerson(actorLayer, { ...kit, ...extra });
+      f.actor = addActor(f.g, z);
       placePerson(f, x, z);
-      f.pose({ crouch: 0.8, armL: -25, armR: 25 });
+      f.pose(poseArgs);
       return f;
-    });
-    keeper = createPerson(farLayer, { ...bowlKit, view: 'front', gloves: '#f4f4ee' });
-    placePerson(keeper, spinner ? -0.15 : -0.25, keeperZ);
-    keeper.pose({ crouch: 1, armL: -25, armR: 25 });
+    };
 
-    batter = createBatter(batterLayer, { shirt: batKit.shirt, trousers: batKit.trousers, helmet: batKit.cap });
-    placePerson(batter, BATTER.x, BATTER.z);
-    batterPose = { ...STANCE };
-    batter.pose(batterPose);
+    // Keeper and slips sit right in front of the lens in the batting camera, so they are left out there.
+    keeperZ = spinner ? -1.4 : -11;
+    keeper = null;
+    if (!batting) {
+      if (!spinner) for (const [x, z] of [[-1.7, -12], [-2.8, -12.4]]) person(bowlKit, x * -off, z, { view: 'front' }, { crouch: 0.8, armL: -25, armR: 25 });
+      keeper = person(bowlKit, (spinner ? 0.15 : 0.25) * off, keeperZ, { view: 'front', gloves: '#f4f4ee' }, { crouch: 1, armL: -25, armR: 25 });
+    }
+
+    batter = createBatter3D(actorLayer, { shirt: batKit.shirt, trousers: batKit.trousers, helmet: batKit.cap });
+    batter.actor = addActor(batter.g, BATTER_Z);
+    batX = -off * (GUARD_X + batOffset);
+    batPose = { ...STANCE };
+    drawBatter();
+    drawGuardMark();
     const idleStart = performance.now();
     track('batter', (now) => {
+      // A small tap of the bat while waiting.
       const t = (now - idleStart) / 1000;
-      setBatter({ a: STANCE.a + Math.max(0, Math.sin(t * 5)) * 8 });
+      const tap = Math.max(0, Math.sin(t * 5)) * 0.06;
+      setPose({ ...batPose, hands: [STANCE.hands[0], STANCE.hands[1] + tap, STANCE.hands[2]], dir: [STANCE.dir[0], STANCE.dir[1], STANCE.dir[2] - tap * 2] });
       return true;
     });
 
-    const nonStriker = createPerson(nearLayer, { ...batKit, view: 'back', bat: true });
-    placePerson(nonStriker, NON_STRIKER.x, NON_STRIKER.z);
-    nonStriker.pose({ armR: 8, armL: -10 });
-    umpire = createPerson(nearLayer, { shirt: '#f4f4ee', trousers: '#262626', cap: '#f4f4ee', view: 'back', hat: true });
-    placePerson(umpire, UMPIRE.x, UMPIRE.z);
-    umpire.pose({});
-    bowler = createPerson(nearLayer, { ...bowlKit, view: 'back' });
+    person(batKit, NON_STRIKER.x * -off, NON_STRIKER.z, { ...facing(batting), bat: true }, { armR: 8, armL: -10 });
+    umpire = person({ shirt: '#f4f4ee', trousers: '#262626', cap: '#f4f4ee' }, UMPIRE.x, UMPIRE.z, { ...facing(batting), hat: true }, {});
+    bowler = person(bowlKit, RUN_START.x, RUN_START.z, facing(batting), {});
     bowlerPos = { ...RUN_START };
     placeBowler();
-    bowler.pose({});
     bowler.holdBall(true);
+    sortActors();
 
     // Field cam tokens.
     fieldersG.replaceChildren();
     runnersG.replaceChildren();
-    fielders = FIELD.map(([ang, r]) => token(fieldersG, bowlKit.shirt, fromStriker(ang, r)));
+    fielders = FIELD.map(([ang, r]) => token(fieldersG, bowlKit.shirt, fromStriker(ang * -off, r)));
     fielders.push(token(fieldersG, bowlKit.shirt, [0, STRIKER_END - (spinner ? 2 : 12)]));
     fielders.push(token(fieldersG, bowlKit.shirt, [-2, BOWLER_END + 6]));
     runners = [token(runnersG, batKit.shirt, [1.2, STRIKER_END + 1.6], true), token(runnersG, batKit.shirt, [-1.2, BOWLER_END - 1.6], true)];
@@ -303,15 +428,10 @@ export function createScene(host) {
 
   function placeBowler() {
     placePerson(bowler, bowlerPos.x, bowlerPos.z);
-    // The bowler passes the umpire: draw whichever is nearer the camera on top.
-    const want = bowlerPos.z > UMPIRE.z ? null : umpire.g;
-    if (want) {
-      if (bowler.g.nextSibling !== want) nearLayer.insertBefore(bowler.g, want);
-    } else if (nearLayer.lastChild !== bowler.g) nearLayer.append(bowler.g);
   }
 
   function setMarker(delivery) {
-    const path = deliveryPath(delivery);
+    const path = deliveryPath(delivery, off);
     const [sx, sy, s] = project(path.bounce.x, 0, path.bounce.z);
     set(marker, { cx: sx, cy: sy, rx: 0.24 * s, ry: 0.09 * s, visibility: 'visible' });
   }
@@ -372,12 +492,13 @@ export function createScene(host) {
   /**
    * Bowl the ball. opts.pre: a BallResult known in advance (the AI's ball, or
    * what a leave would do) so the ball heads for the stumps or pad when it
-   * should. opts.swing: {shot, atMs} plays the batter's shot at that time.
+   * should. opts.swing: {shot, atMs, aimDeg?, aerial?} plays the batter's
+   * shot at that time.
    */
   function release(delivery, { pre = null, swing = null } = {}) {
     hideMarker();
     followThrough();
-    const path = deliveryPath(delivery);
+    const path = deliveryPath(delivery, off);
     const start = performance.now();
     const arriveAt = start + delivery.travelMs;
     let target = null;
@@ -385,7 +506,7 @@ export function createScene(host) {
     else if (pre?.wicket?.kind === 'lbw') target = 'pad';
     flight = { path, start, arriveAt, delivery, swung: false };
     animateBatter([{ ms: 300, ...BACKLIFT }]);
-    if (swing) at(Math.max(0, swing.atMs - 70), () => swingBat(swing.shot));
+    if (swing) at(Math.max(0, swing.atMs - 70), () => swingBat(swing.shot, swing));
     // Without a shot by now, the batter shoulders arms.
     at(delivery.travelMs - 90, () => {
       if (!flight.swung) {
@@ -404,7 +525,7 @@ export function createScene(host) {
           return false;
         }
       }
-      if (p.z <= keeperZ + 0.4) {
+      if (p.z <= keeperZ + 0.4 || (camMode === 'batting' && p.z < cam.z + 2.5)) {
         keeperTake();
         return false;
       }
@@ -415,7 +536,7 @@ export function createScene(host) {
 
   // Move from p toward the stumps or pad by dist metres.
   function towards(p, target, dist) {
-    const goal = target === 'stumps' ? { x: 0, y: 0.35, z: 0 } : { x: BATTER.x - 0.22, y: 0.42, z: BATTER.z + 0.1 };
+    const goal = target === 'stumps' ? { x: 0, y: 0.35, z: 0 } : padPoint();
     const dx = goal.x - p.x;
     const dy = goal.y - p.y;
     const dz = goal.z - p.z;
@@ -429,14 +550,19 @@ export function createScene(host) {
     if (target === 'stumps') breakStumps();
   }
 
+  // Front pad of the striker, where an LBW ball strikes.
+  function padPoint() {
+    return { x: batX + off * 0.22, y: 0.42, z: BATTER_Z + 0.25 };
+  }
+
   function keeperTake() {
     hideBall();
     personTween('keeper', keeper, { crouch: 1, armL: -25, armR: 25 }, { crouch: 0.45, armL: -150, armR: 150 }, 220);
   }
 
   function breakStumps() {
-    if (farStumps.broken) return;
-    farStumps.break(track);
+    if (!strikerStumps || strikerStumps.broken) return;
+    strikerStumps.break(track);
   }
 
   function currentBallPos() {
@@ -444,10 +570,13 @@ export function createScene(host) {
     return flight.path((performance.now() - flight.start) / 1000);
   }
 
-  function swingBat(shot) {
+  // opts: { aimDeg, aerial }. An aerial shot always uses the lofted swing.
+  function swingBat(shot, opts = {}) {
     if (!batter) return;
     if (flight) flight.swung = true;
-    animateBatter(SWINGS[shot] ?? SWINGS.defend);
+    showAim(null);
+    const kind = opts.aerial && shot !== 'defend' && shot !== 'leave' ? 'loft' : SWINGS[shot] ? shot : 'defend';
+    animateBatter(aimSwing(SWINGS[kind], kind, opts.aimDeg));
   }
 
   // ---- Outcome ----
@@ -479,7 +608,7 @@ export function createScene(host) {
 
     // Ball runs on to the stumps or pad from wherever it is.
     function toTarget(target, signalDelay) {
-      const goal = target === 'stumps' ? { x: 0, z: 0 } : { x: BATTER.x, z: BATTER.z };
+      const goal = target === 'stumps' ? { x: 0, z: 0 } : padPoint();
       const vz = flight?.path.vz ?? 25;
       const gap = (p) => Math.hypot(p.z - goal.z, p.x - goal.x);
       const startPos = wait > 0 && flight ? flight.path(flight.path.T) : currentBallPos();
@@ -508,7 +637,7 @@ export function createScene(host) {
       const start = performance.now() + wait;
       const from = () => currentBallPos();
       let anchor = null;
-      const goal = { x: -0.25, y: 0.7, z: keeperZ + 0.4 };
+      const goal = { x: off * 0.25, y: 0.7, z: keeperZ + 0.4 };
       const ms = 260;
       track('ball', (t) => {
         if (t < start) {
@@ -527,13 +656,16 @@ export function createScene(host) {
       return { flashAt: 320, total: 900 };
     }
 
-    // A shot that doesn't score: the ball dribbles back down the pitch.
+    // A shot that doesn't score: the ball dribbles away. Defended balls die
+    // near the batter. Direction comes from the engine when it gives one.
     function dotHit(s) {
       const start = performance.now() + wait;
       let anchor = null;
-      const reach = s === 'defend' ? rand(3, 7) : rand(8, 14);
-      const goal = { x: rand(-2.5, 2.5) + (s === 'cut' ? -4 : s === 'pull' ? 4 : 0), y: 0, z: CREASE_Z + reach };
-      const ms = 650;
+      const reach = s === 'defend' ? rand(1.2, 3.2) : rand(8, 14);
+      let ang = worldAngle(ball);
+      if (ang == null) ang = (s === 'cut' ? rand(-80, -60) : s === 'pull' ? rand(60, 80) : rand(-12, 12)) * -off;
+      const r = (ang * Math.PI) / 180;
+      const ms = s === 'defend' ? 500 : 650;
       track('ball', (t) => {
         if (t < start) {
           drawBall(currentBallPos());
@@ -541,7 +673,11 @@ export function createScene(host) {
         }
         anchor ??= { ...currentBallPos(), z: Math.max(CREASE_Z, currentBallPos().z) };
         const u = easeOut(clamp01((t - start) / ms));
-        drawBall({ x: lerp(anchor.x, goal.x, u), y: Math.max(0.03, lerp(anchor.y, 0, Math.min(1, u * 3)) + Math.abs(Math.sin(u * Math.PI * 2)) * 0.15 * (1 - u)), z: lerp(anchor.z, goal.z, u) });
+        drawBall({
+          x: anchor.x + Math.sin(r) * reach * u,
+          y: Math.max(0.03, lerp(anchor.y, 0, Math.min(1, u * 3)) + Math.abs(Math.sin(u * Math.PI * 2)) * 0.15 * (1 - u)),
+          z: anchor.z + Math.cos(r) * reach * u,
+        });
         return t - start < ms;
       });
       return { flashAt: 300, total: 900 };
@@ -557,44 +693,62 @@ export function createScene(host) {
     }
   }
 
-  // The ball goes into the field: switch to the top-down view.
+  // Field angle in degrees (+ toward world +X) for the engine's
+  // batter-relative angle, or null when the engine didn't give one.
+  function worldAngle(ball) {
+    return ball.angleDeg == null ? null : ball.angleDeg * -off;
+  }
+
+  // The ball goes into the field: switch to the top-down view. The engine's
+  // angleDeg, aerial, carryM and distanceM drive the path, so a six clears the
+  // rope in the air, a four reaches it, and a catch is taken where it lands.
   function fieldPlay(ball, shot, kind, wait) {
     const runs = ball.runs;
-    const [lo, hi] = SHOT_ANGLES[shot] ?? SHOT_ANGLES.drive;
-    let ang = rand(lo, hi);
-    if (!kind && runs > 0 && runs < 4 && ball.timing === 'late' && Math.random() < 0.5) ang = rand(-160, -125);
-    if (!kind && runs > 0 && runs < 4 && ball.timing === 'early' && Math.random() < 0.5) ang = rand(125, 160);
-
-    let dist;
-    let air = 0;
-    let ms;
-    if (kind === 'caught') {
-      dist = { loft: rand(45, 58), pull: rand(30, 45), drive: rand(22, 35), cut: rand(18, 28) }[shot] ?? 30;
-      air = dist * 0.45;
-      ms = 1250;
-    } else if (kind === 'runout') {
-      dist = rand(14, 22);
-      ms = 550;
-    } else if (runs === 6) {
-      dist = toRope(ang) + rand(10, 22);
-      air = 24;
-      ms = 1400;
-    } else if (runs === 4) {
-      dist = toRope(ang) - 0.5;
-      ms = 1150;
-    } else {
-      dist = [0, rand(16, 26), rand(30, 42), rand(46, 54)][runs] ?? 20;
-      ms = 650 + runs * 120;
+    let ang = worldAngle(ball);
+    if (ang == null) {
+      const [lo, hi] = SHOT_ANGLES[shot] ?? SHOT_ANGLES.drive;
+      ang = rand(lo, hi);
+      if (!kind && runs > 0 && runs < 4 && ball.timing === 'late' && Math.random() < 0.5) ang = rand(-160, -125);
+      if (!kind && runs > 0 && runs < 4 && ball.timing === 'early' && Math.random() < 0.5) ang = rand(125, 160);
+      ang *= -off;
     }
-    const startPt = [0.6, STRIKER_END + 1.4];
-    const endPt = fromStriker(ang, dist);
-    const [tx, ty] = fpos(...startPt);
-    set(fTrail, { x1: tx, y1: ty, x2: tx, y2: ty });
+    const rope = toRope(ang);
+    const hasEngine = ball.distanceM != null;
+    let aerial = ball.aerial ?? (runs === 6 || (kind === 'caught' && shot !== 'defend'));
+    let carry;
+    let total;
+    if (runs === 6) {
+      aerial = true;
+      carry = Math.max(ball.carryM ?? 0, rope + rand(6, 16));
+      total = carry;
+    } else if (kind === 'caught') {
+      aerial = true;
+      carry = Math.min(rope - 3, hasEngine ? ball.carryM || ball.distanceM : { loft: rand(45, 58), pull: rand(30, 45), drive: rand(22, 35), cut: rand(18, 28) }[shot] ?? 30);
+      total = carry;
+    } else if (runs === 4) {
+      carry = aerial ? Math.min(rope - 4, Math.max(8, ball.carryM ?? rope * 0.6)) : 0;
+      total = rope - 0.5;
+    } else if (kind === 'runout') {
+      total = Math.min(rope - 4, hasEngine ? ball.distanceM : rand(14, 22));
+      carry = aerial ? Math.min(total, ball.carryM ?? 0) : 0;
+    } else {
+      total = Math.min(rope - 4, hasEngine ? ball.distanceM : [0, rand(16, 26), rand(30, 42), rand(46, 54)][runs] ?? 20);
+      carry = aerial ? Math.min(total, ball.carryM ?? total * 0.6) : 0;
+    }
+    carry = Math.max(0, carry || 0);
+    const airMs = carry ? 500 + carry * 13 : 0;
+    const rollMs = total > carry ? 350 + (total - carry) * 14 : 0;
+    const ms = airMs + rollMs;
+    const peak = Math.min(30, carry * 0.4);
+
+    const startPt = [0.6 * -off, STRIKER_END + 1.4];
+    const landPt = fromStriker(ang, carry);
+    const endPt = fromStriker(ang, total);
     const t0 = performance.now() + wait;
 
     // Pitch cam for a moment as the ball leaves the bat, then cut to the field.
     const hitStart = currentBallPos();
-    const dirX = Math.sin((ang * Math.PI) / 180);
+    const r = (ang * Math.PI) / 180;
     let anchor = null;
     track('ball', (t) => {
       if (t < t0) {
@@ -602,36 +756,52 @@ export function createScene(host) {
         return true;
       }
       anchor ??= { ...hitStart, z: Math.max(CREASE_Z, currentBallPos().z) };
-      const u = clamp01((t - t0) / 220);
-      drawBall({ x: anchor.x + dirX * 6 * u, y: anchor.y + (air ? 3.5 : 0.4) * u, z: anchor.z + Math.cos((ang * Math.PI) / 180) * 10 * u });
+      const u = clamp01((t - t0) / 260);
+      drawBall({ x: anchor.x + Math.sin(r) * 7 * u, y: anchor.y + (aerial ? 4 : 0.2) * u, z: anchor.z + Math.cos(r) * 11 * u });
       return u < 1;
     });
 
-    // Nearest fielder (not the keeper on a boundary) chases or takes the catch.
+    // Nearest fielder chases, or gets under a catch at the landing point.
+    const target = kind === 'caught' ? landPt : endPt;
     let chaser = null;
     let best = Infinity;
     for (const f of fielders) {
-      const d = Math.hypot(f.pos[0] - endPt[0], f.pos[1] - endPt[1]);
+      const d = Math.hypot(f.pos[0] - target[0], f.pos[1] - target[1]);
       if (d < best) [best, chaser] = [d, f];
     }
-    const fielderGoal = kind === 'caught' ? endPt : runs >= 4 ? lerpPt(chaser.pos, endPt, 0.6) : endPt;
+    const fielderGoal = kind === 'caught' ? landPt : runs >= 4 ? lerpPt(chaser.pos, endPt, 0.6) : endPt;
 
-    at(wait + 200, () => setCam('field'));
-    const flightStart = t0 + 220;
+    at(wait + 240, () => setCam('field'));
+    const flightStart = t0 + 260;
+    const line = [];
+    const shadowLine = [];
     tracks.set('fball', (t) => {
       if (t < flightStart) return true;
-      const u = clamp01((t - flightStart) / ms);
-      const e = air ? u : easeOut(u);
-      const X = lerp(startPt[0], endPt[0], e);
-      const Y = lerp(startPt[1], endPt[1], e);
-      drawFieldBall(X, Y, air * Math.sin(Math.PI * u));
-      return u < 1;
+      const ms0 = t - flightStart;
+      let X;
+      let Y;
+      let h = 0;
+      if (ms0 < airMs) {
+        const u = ms0 / airMs;
+        [X, Y] = lerpPt(startPt, landPt, u);
+        h = peak * Math.sin(Math.PI * u);
+      } else {
+        const u = rollMs ? easeOut(clamp01((ms0 - airMs) / rollMs)) : 1;
+        [X, Y] = lerpPt(carry ? landPt : startPt, endPt, u);
+      }
+      drawFieldBall(X, Y, h);
+      const [x, y] = fpos(X, Y);
+      line.push([x, y - h * 0.9]);
+      shadowLine.push([x, y]);
+      set(hitLine, { points: pts(line), visibility: 'visible' });
+      if (carry) set(hitShadow, { points: pts(shadowLine), visibility: 'visible' });
+      return ms0 < ms;
     });
-    moveToken('chaser', chaser, fielderGoal, flightStart, ms * (kind === 'caught' ? 0.95 : 0.9));
+    moveToken('chaser', chaser, fielderGoal, flightStart, (kind === 'caught' ? airMs : ms) * 0.92);
 
     const done = flightStart - performance.now() + ms;
-    let total = done + 300;
-    let flashAt = done;
+    let flashAt = kind === 'caught' ? flightStart - performance.now() + airMs : done;
+    let totalMs = done + 300;
     if (runs >= 1 && runs <= 3) {
       // Batters run; the fielder returns the ball to the keeper.
       runBetween(runs, flightStart);
@@ -643,8 +813,8 @@ export function createScene(host) {
         drawFieldBall(lerp(endPt[0], keeperPt[0], u), lerp(endPt[1], keeperPt[1], u), Math.sin(Math.PI * u) * 4);
         return u < 1;
       });
-      total = Math.max(done + 650, flightStart - performance.now() + runs * 620 + 200);
-      flashAt = total - 200;
+      totalMs = Math.max(done + 650, flightStart - performance.now() + runs * 620 + 200);
+      flashAt = totalMs - 200;
     } else if (kind === 'runout') {
       runBetween(1, flightStart, 0.75);
       const throwAt = flightStart + ms + 120;
@@ -657,9 +827,9 @@ export function createScene(host) {
         return u < 1;
       });
       flashAt = throwAt - performance.now() + 400;
-      total = flashAt + 300;
+      totalMs = flashAt + 300;
     }
-    return { flashAt, total };
+    return { flashAt, total: totalMs };
   }
 
   function runBetween(runs, startAt, stopShort = 1) {
@@ -697,7 +867,6 @@ export function createScene(host) {
     const k = 1 + h / 10;
     set(fBall, { cx: x, cy: y - h * 0.9, r: 3 * k, visibility: 'visible' });
     set(fBallShadow, { cx: x, cy: y, visibility: 'visible' });
-    set(fTrail, { x2: x, y2: y, visibility: 'visible' });
   }
 
   function signal(kind) {
@@ -720,12 +889,104 @@ export function createScene(host) {
   }
 
   function hideFieldBall() {
-    for (const node of [fBall, fBallShadow, fTrail]) node.setAttribute('visibility', 'hidden');
+    for (const node of [fBall, fBallShadow, hitLine, hitShadow]) node.setAttribute('visibility', 'hidden');
+    hitLine.setAttribute('points', '');
+    hitShadow.setAttribute('points', '');
   }
   hideBall();
   hideFieldBall();
 
-  return { newBall, setMarker, hideMarker, runUp, release, swing: swingBat, outcome, destroy };
+  // ---- Camera, striker position and aim (SPEC 12.4) ----
+
+  /** 'batting' puts the pitch cam behind the striker; 'bowling' behind the bowler. */
+  function setCamera(mode) {
+    const next = mode === 'batting' ? 'batting' : 'bowling';
+    if (next === camMode) return;
+    camMode = next;
+    cam = CAMS[camMode];
+    fieldFlip = camMode === 'batting' ? -1 : 1;
+    rebuildBackground();
+    placeFieldStumps();
+    if (lastBallOpts) newBall(lastBallOpts);
+  }
+
+  /**
+   * Striker's hand and guard. offsetX is metres from normal guard, + toward
+   * the batter's leg side, clamped to +-0.6. Moves animate as a shuffle.
+   */
+  function setBatter({ bats = 'R', offsetX = 0 } = {}) {
+    const side = bats === 'L' ? 'L' : 'R';
+    const offset = Math.max(-MOVE_LIMIT, Math.min(MOVE_LIMIT, Number(offsetX) || 0));
+    if (side !== batSide) {
+      batSide = side;
+      off = side === 'L' ? 1 : -1;
+      batOffset = offset;
+      if (lastBallOpts) newBall(lastBallOpts);
+      return;
+    }
+    if (offset === batOffset) return;
+    const fromX = batX;
+    batOffset = offset;
+    const toX = -off * (GUARD_X + offset);
+    if (!batter) {
+      batX = toX;
+      return;
+    }
+    const start = performance.now();
+    const ms = 160 + Math.abs(toX - fromX) * 300;
+    track('shuffle', (now) => {
+      const u = clamp01((now - start) / ms);
+      batX = lerp(fromX, toX, easeInOut(u));
+      // Lead foot steps first, then the back foot follows.
+      batPose = { ...batPose, lift: [Math.sin(Math.PI * clamp01(u * 1.8)), Math.sin(Math.PI * clamp01(u * 1.8 - 0.8))] };
+      drawBatter();
+      drawGuardMark();
+      return u < 1;
+    });
+  }
+
+  /**
+   * Live aim arrow from the bat while the player swipes: dashed along the
+   * ground for a ground shot, arched for an aerial one. null hides it.
+   */
+  function showAim(aim) {
+    if (!aim || aim.aimDeg == null || !batter) {
+      aimLayer.setAttribute('visibility', 'hidden');
+      return;
+    }
+    const ang = (aim.aimDeg * -off * Math.PI) / 180;
+    const from = { x: batX + off * 0.38, z: CREASE_Z };
+    const len = aim.aerial ? 8 : 6;
+    const points = [];
+    for (let i = 0; i <= 14; i++) {
+      const u = i / 14;
+      const y = aim.aerial ? 0.25 + Math.sin(Math.PI * u * 0.85) * 2.4 : 0.06;
+      points.push(project(from.x + Math.sin(ang) * len * u, y, from.z + Math.cos(ang) * len * u));
+    }
+    const near = points[0][2];
+    set(aimPath, {
+      points: pts(points),
+      'stroke-width': Math.max(1.4, 0.07 * near).toFixed(2),
+      'stroke-dasharray': aim.aerial ? 'none' : `${(0.25 * near).toFixed(1)} ${(0.18 * near).toFixed(1)}`,
+    });
+    // Arrowhead in screen space along the last segment.
+    const [ex, ey] = points[points.length - 1];
+    const [px, py] = points[points.length - 3];
+    const d = Math.hypot(ex - px, ey - py) || 1;
+    const ux = (ex - px) / d;
+    const uy = (ey - py) / d;
+    const size = 6;
+    set(aimHead, { points: pts([[ex + ux * size, ey + uy * size], [ex - uy * size * 0.6, ey + ux * size * 0.6], [ex + uy * size * 0.6, ey - ux * size * 0.6]]) });
+    aimLayer.setAttribute('visibility', 'visible');
+  }
+
+  function rebuildBackground() {
+    bgLayer.replaceChildren();
+    drawPitchCamBackground(bgLayer);
+  }
+  rebuildBackground();
+
+  return { newBall, setMarker, hideMarker, runUp, release, swing: swingBat, outcome, destroy, setCamera, setBatter, showAim };
 
   // ---- Static drawing ----
   function makeStumps(parent, z) {
@@ -741,6 +1002,7 @@ export function createScene(host) {
       return svg('line', { x1: xa, y1: y, x2: xb, y2: y, stroke: '#e8d29a', 'stroke-width': Math.max(0.8, 0.035 * s), 'stroke-linecap': 'round' }, g);
     });
     const api = {
+      g,
       broken: false,
       reset() {
         api.broken = false;
@@ -826,43 +1088,54 @@ function buildDefs(root) {
   svg('circle', { cx, cy, r: ROPE * FS + 3 }, clip);
 }
 
+// Draws for the current camera: the far rope, boards, sightscreen and stands
+// are beyond whichever end the camera looks toward.
 function drawPitchCamBackground(g) {
-  svg('rect', { x: -2000, y: -2000, width: 4400, height: 2100, fill: 'url(#sc-sky)' }, g);
-  const [, ropeY] = project(0, 0, -66);
-  const [, boardTop] = project(0, 0.9, -67);
+  const far = cam.dir < 0 ? -66 : 20.12 + 66;
+  const beyond = (m) => far + cam.dir * m;
+  svg('rect', { x: -2000, y: -2000, width: 4400, height: 2100 + Math.max(0, cam.horizon), fill: 'url(#sc-sky)' }, g);
+  const [, ropeY] = project(0, 0, far);
+  const [, boardTop] = project(0, 0.9, beyond(1));
   // Stands, with floodlight glow on top.
-  svg('rect', { x: -2000, y: -400, width: 4400, height: boardTop + 400, fill: 'url(#sc-crowd)' }, g);
-  svg('rect', { x: -2000, y: -400, width: 4400, height: boardTop + 400, fill: 'url(#sc-stand)' }, g);
+  // The far camera sees a shallow tier of stands under the night sky.
+  const standTop = cam.dir > 0 ? boardTop - 55 : -400;
+  svg('rect', { x: -2000, y: standTop, width: 4400, height: boardTop - standTop, fill: 'url(#sc-crowd)' }, g);
+  svg('rect', { x: -2000, y: standTop, width: 4400, height: boardTop - standTop, fill: 'url(#sc-stand)' }, g);
   // Advertising boards and the sightscreen behind the batter.
   const boardColors = ['#1f5fbf', '#d4213d', '#0f6b3a', '#f2b705'];
   for (let i = -14; i < 14; i++) {
-    const [x0] = project(i * 8, 0, -67);
-    const [x1] = project(i * 8 + 8, 0, -67);
-    svg('rect', { x: x0, y: boardTop, width: x1 - x0, height: ropeY - boardTop, fill: boardColors[(i + 40) % 4] }, g);
+    const [x0] = project(i * 8, 0, beyond(1));
+    const [x1] = project(i * 8 + 8, 0, beyond(1));
+    svg('rect', { x: Math.min(x0, x1), y: boardTop, width: Math.abs(x1 - x0), height: ropeY - boardTop, fill: boardColors[(i + 40) % 4] }, g);
   }
-  const [sx0, sy0] = project(-3.5, 0, -68);
-  const [sx1, sy1] = project(3.5, 3.6, -68);
-  svg('rect', { x: sx0, y: sy1, width: sx1 - sx0, height: sy0 - sy1, fill: '#dfe6e3' }, g);
+  const [sx0, sy0] = project(-3.5, 0, beyond(2));
+  const [sx1, sy1] = project(3.5, 3.6, beyond(2));
+  svg('rect', { x: Math.min(sx0, sx1), y: sy1, width: Math.abs(sx1 - sx0), height: sy0 - sy1, fill: '#dfe6e3' }, g);
 
   // Outfield with mowing stripes.
   svg('rect', { x: -2000, y: ropeY, width: 4400, height: 2000, fill: '#2f7d3c' }, g);
-  for (let z = -66, i = 0; z < 34; z += 5, i++) {
+  const zNear = cam.z + cam.dir * 1.5;
+  const [zLo, zHi] = [Math.min(far, zNear), Math.max(far, zNear)];
+  for (let z = zLo, i = 0; z < zHi; z += 5, i++) {
     if (i % 2) continue;
     const a = project(-120, 0, z);
     const b = project(120, 0, z);
-    const c = project(120, 0, Math.min(34, z + 5));
-    const d = project(-120, 0, Math.min(34, z + 5));
+    const c = project(120, 0, Math.min(zHi, z + 5));
+    const d = project(-120, 0, Math.min(zHi, z + 5));
     svg('polygon', { points: pts([a, b, c, d]), fill: '#36883f' }, g);
   }
   svg('line', { x1: -2000, y1: ropeY, x2: 2400, y2: ropeY, stroke: '#f4f4ee', 'stroke-width': 1 }, g);
 
   // Thirty-yard circle.
+  // Only the part in front of the camera.
   const ring = [];
   for (let i = 0; i <= 72; i++) {
     const a = (i / 72) * Math.PI * 2;
-    ring.push(project(Math.sin(a) * 27.4, 0, 10.06 + Math.cos(a) * 27.4));
+    const z = 10.06 + Math.cos(a) * 27.4;
+    if (camDepth(z) > 2) ring.push(project(Math.sin(a) * 27.4, 0, z));
+    else if (ring.length) break;
   }
-  svg('polyline', { points: pts(ring), fill: 'none', stroke: 'rgba(255,255,255,0.45)', 'stroke-width': 0.8, 'stroke-dasharray': '3 3' }, g);
+  if (ring.length > 1) svg('polyline', { points: pts(ring), fill: 'none', stroke: 'rgba(255,255,255,0.45)', 'stroke-width': 0.8, 'stroke-dasharray': '3 3' }, g);
 
   // The pitch, creases and footmarks.
   const corners = [project(-1.52, 0, -1.2), project(1.52, 0, -1.2), project(1.52, 0, 21.3), project(-1.52, 0, 21.3)];

@@ -9,6 +9,7 @@
  * @property {number} batting       1..100
  * @property {number} bowling       1..100
  * @property {'pace'|'spin'|null} bowlType
+ * @property {'R'|'L'} bats         batting hand; about 30% left-handed
  */
 
 /** @typedef {Object} Team

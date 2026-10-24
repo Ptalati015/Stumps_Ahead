@@ -87,6 +87,20 @@ test('many fixtures: no real surnames, no duplicate names within a match', () =>
   }
 });
 
+test('about 30% of players bat left-handed', () => {
+  let left = 0;
+  let total = 0;
+  for (let seed = 1; seed <= 200; seed++) {
+    for (const p of generateTeam('ENG', testRng(seed)).players) {
+      assert.ok(p.bats === 'R' || p.bats === 'L');
+      if (p.bats === 'L') left++;
+      total++;
+    }
+  }
+  const share = left / total;
+  assert.ok(share > 0.25 && share < 0.35, `left-handed share ${share}`);
+});
+
 test('same seed gives the same squad; reroll gives a different one', () => {
   const a = generateTeam('IND', testRng(42));
   const b = generateTeam('IND', testRng(42));

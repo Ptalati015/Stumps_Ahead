@@ -101,6 +101,9 @@ function pickNames(code, count, rng, taken) {
   return names;
 }
 
+// Roughly the share of left-handed batters in international cricket.
+const LEFT_HANDED_PCT = 30;
+
 function bowlTypes(code, rng) {
   // Four specialist bowlers: `spinBias` spinners, rest pace. All-rounders
   // are one of each so every side has a spin option.
@@ -133,6 +136,7 @@ export function generateTeam(code, rng, taken = new Set()) {
       batting: rng.int(slot.bat[0], slot.bat[1]),
       bowling: rng.int(slot.bowl[0], slot.bowl[1]),
       bowlType,
+      bats: rng.int(1, 100) <= LEFT_HANDED_PCT ? 'L' : 'R',
     };
   });
   return { code, name: nation.name, colors: { ...nation.colors }, players };
