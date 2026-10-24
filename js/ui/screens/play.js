@@ -5,14 +5,12 @@ import {
   currentInnings, playerById, teamByCode, isUserBatting, oversText, runRate, chaseInfo, maxOversPerBowler,
 } from '../../engine/match.js';
 import { SHOTS, SHOT_LABELS, LINES, LENGTHS, LINE_LABELS, LENGTH_LABELS, TIMING_WINDOWS } from '../../engine/outcomes.js';
+import { createScene } from '../scene/scene.js';
 
-const RUN_UP_MS = 700;
-const PAUSE_AFTER_BALL_MS = 1400;
+const RUN_UP_MS = 1100;
+const PAUSE_AFTER_BALL_MS = 1100;
 const PAUSE_BEFORE_NAV_MS = 1800;
 const METER_PERIOD_MS = 1100;
-// Where the ball pitches, as a fraction of the way down the pitch.
-const BOUNCE_Y = { yorker: 0.93, full: 0.8, good: 0.64, short: 0.45 };
-const LINE_X = { off: -0.13, middle: 0, leg: 0.13 };
 const SHOT_KEYS = { defend: 'd', drive: 'f', pull: 'p', cut: 'c', loft: 'l' };
 
 function el(tag, className, text) {
@@ -65,16 +63,9 @@ export function mount(root, props, navigate) {
   const miniScore = el('div', 'pl-mini');
   const players = el('div', 'pl-players');
   const pitchWrap = el('div', 'pl-pitch-wrap');
-  const pitch = el('div', 'pl-pitch');
-  const crease = el('div', 'pl-zone');
-  const marker = el('div', 'pl-marker');
-  const ball = el('div', 'pl-ball');
   const flash = el('div', 'pl-flash');
   const speed = el('div', 'pl-speed');
-  marker.hidden = true;
-  ball.hidden = true;
-  pitch.append(el('div', 'pl-stumps pl-stumps-top'), crease, marker, ball, el('div', 'pl-stumps pl-stumps-bottom'));
-  pitchWrap.append(pitch, flash, speed);
+  pitchWrap.append(flash, speed);
   const overRow = el('div', 'pl-over');
   const commentary = el('p', 'pl-comm', '');
   commentary.setAttribute('aria-live', 'polite');
@@ -82,6 +73,7 @@ export function mount(root, props, navigate) {
   scoreSlot.append(miniScore);
   screen.append(scoreSlot, players, pitchWrap, overRow, commentary, controls);
   root.append(screen);
+  const scene = createScene(pitchWrap);
 
   // Joel's shared scoreboard, if it is there; the mini score is the fallback.
   let renderScoreboard = null;
@@ -148,48 +140,18 @@ export function mount(root, props, navigate) {
     }
   }
 
-  // ---- Ball animation ----
-  function placeMarker(line, length, extra) {
-    const x = extra === 'wide' ? (line === 'leg' ? 0.36 : -0.36) : LINE_X[line];
-    marker.style.left = `${50 + x * 100}%`;
-    marker.style.top = `${BOUNCE_Y[length] * 100}%`;
-    marker.hidden = false;
-  }
-
+  // ---- Scene ----
   function resetBall() {
-    ball.hidden = true;
-    marker.hidden = true;
-    ball.style.transform = '';
+    const inn = currentInnings(state);
+    const bowler = inn.bowlerId ? playerById(state, inn.bowlerId) : null;
+    scene.newBall({
+      batColors: teamByCode(state, inn.battingTeam).colors,
+      bowlColors: teamByCode(state, inn.bowlingTeam).colors,
+      spinner: bowler?.bowlType === 'spin',
+    });
     flash.textContent = '';
     flash.className = 'pl-flash';
     speed.textContent = '';
-  }
-
-  // Moves the ball from the bowler's end to past the batter. onArrive fires at
-  // the crease, onDone after the late window closes.
-  function animateBall(delivery, startAt, endMs, onDone) {
-    const x = delivery.extra === 'wide' ? (delivery.line === 'leg' ? 0.36 : -0.36) : LINE_X[delivery.line];
-    const bounce = BOUNCE_Y[delivery.length];
-    const h = pitch.clientHeight;
-    const w = pitch.clientWidth;
-    ball.hidden = false;
-    speed.textContent = `${delivery.kph} kph`;
-    let finished = false;
-    const step = (now) => {
-      const elapsed = now - startAt;
-      const p = Math.max(0, elapsed / delivery.travelMs);
-      const y = Math.min(p, 1.12);
-      // Height above the pitch: falls to the bounce point, then rises a little.
-      const lift = y < bounce ? (1 - y / bounce) * 0.06 : Math.min(0.05, (y - bounce) * 0.25);
-      const scale = 0.55 + 0.6 * Math.min(y, 1);
-      ball.style.transform = `translate(${w * (0.5 + x * y)}px, ${h * (y - lift)}px) translate(-50%, -50%) scale(${scale.toFixed(3)})`;
-      if (elapsed >= endMs) {
-        finished = true;
-        onDone();
-      }
-      if (!finished) frame(step);
-    };
-    frame(step);
   }
 
   function showFlash(ballResult, extraLabel) {
@@ -209,17 +171,22 @@ export function mount(root, props, navigate) {
   }
 
   // ---- Game loop ----
+  // The scene acts the ball out; the banner, commentary and score land at its climax.
   function afterBall(result, timingLabel) {
     state = result.state;
-    showFlash(result.ball, timingLabel);
-    commentary.textContent = result.ball.commentary;
-    renderInfo();
+    const { flashAt, total } = scene.outcome(result.ball);
+    later(() => {
+      showFlash(result.ball, timingLabel);
+      commentary.textContent = result.ball.commentary;
+      renderInfo();
+    }, flashAt);
+    const settle = Math.max(flashAt, total);
     if (state.status === 'innings_break') {
-      later(() => navigate('inningsBreak', { ...props, match: state }), PAUSE_BEFORE_NAV_MS);
+      later(() => navigate('inningsBreak', { ...props, match: state }), settle + PAUSE_BEFORE_NAV_MS);
     } else if (state.status === 'complete') {
-      later(() => navigate('result', { ...props, match: state }), PAUSE_BEFORE_NAV_MS);
+      later(() => navigate('result', { ...props, match: state }), settle + PAUSE_BEFORE_NAV_MS);
     } else {
-      later(next, PAUSE_AFTER_BALL_MS);
+      later(next, settle + PAUSE_AFTER_BALL_MS);
     }
   }
 
@@ -238,6 +205,7 @@ export function mount(root, props, navigate) {
       }
     }
     if (state.status !== 'in_play') return;
+    resetBall();
     if (isUserBatting(state)) userBats();
     else showBowlingControls();
   }
@@ -246,7 +214,9 @@ export function mount(root, props, navigate) {
   function userBats() {
     const bowl = aiBowl(state);
     const delivery = previewDelivery(state, bowl);
-    placeMarker(delivery.line, delivery.length, delivery.extra);
+    // What a leave would bring, so an unplayed ball heads for the stumps when it should.
+    const ifLeft = playBall(state, bowl, { shot: 'leave', timingMs: null }).ball;
+    scene.setMarker(delivery);
     controls.textContent = '';
     controls.className = 'pl-controls pl-shots';
     let played = false;
@@ -254,6 +224,7 @@ export function mount(root, props, navigate) {
     const buttons = SHOTS.map((shot) => {
       const b = button('pl-btn pl-shot', SHOT_LABELS[shot], () => playShot(shot));
       b.dataset.shot = shot;
+      b.append(el('kbd', 'pl-key', SHOT_KEYS[shot].toUpperCase()));
       b.disabled = true;
       return b;
     });
@@ -268,6 +239,7 @@ export function mount(root, props, navigate) {
     function playShot(shot) {
       if (played || releaseAt == null) return;
       played = true;
+      scene.swing(shot);
       finish(shot, performance.now() - releaseAt - delivery.travelMs);
     }
     function finish(shot, timingMs) {
@@ -285,12 +257,15 @@ export function mount(root, props, navigate) {
     setKeyHandler(onKey);
 
     commentary.textContent = `${playerById(state, currentInnings(state).bowlerId).name} runs in...`;
+    speed.textContent = `${delivery.kph} kph`;
+    scene.runUp(RUN_UP_MS);
     later(() => {
       releaseAt = performance.now();
       buttons.forEach((b) => (b.disabled = false));
-      animateBall(delivery, releaseAt, delivery.travelMs + TIMING_WINDOWS.edge, () => {
+      scene.release(delivery, { pre: ifLeft });
+      later(() => {
         if (!played) finish('leave', null);
-      });
+      }, delivery.travelMs + TIMING_WINDOWS.edge);
     }, RUN_UP_MS);
   }
 
@@ -330,7 +305,8 @@ export function mount(root, props, navigate) {
   function showBowlingControls() {
     controls.textContent = '';
     controls.className = 'pl-controls pl-bowling';
-    placeMarker(bowlPick.line, bowlPick.length, null);
+    const preview = () => scene.setMarker({ ...bowlPick, extra: null, travelMs: 1000 });
+    preview();
 
     const group = (label, options, labels, key) => {
       const wrap = el('div', 'pl-seg');
@@ -341,7 +317,7 @@ export function mount(root, props, navigate) {
           if (meterRunning) return;
           bowlPick[key] = opt;
           row.querySelectorAll('button').forEach((x) => x.classList.toggle('pl-picked', x === b));
-          placeMarker(bowlPick.line, bowlPick.length, null);
+          preview();
         });
         if (bowlPick[key] === opt) b.classList.add('pl-picked');
         row.append(b);
@@ -399,13 +375,22 @@ export function mount(root, props, navigate) {
     setKeyHandler(null);
     const delivery = previewDelivery(state, bowl);
     const bat = aiBat(state, bowl);
-    placeMarker(delivery.line, delivery.length, delivery.extra);
+    const result = playBall(state, bowl, bat);
+    scene.setMarker(delivery);
     const accuracyText = `Accuracy ${Math.round(bowl.accuracy * 100)}%`;
-    commentary.textContent = accuracyText;
-    animateBall(delivery, performance.now(), delivery.travelMs, () => {
-      afterBall(playBall(state, bowl, bat), accuracyText);
-    });
+    commentary.textContent = `${accuracyText}. ${playerById(state, currentInnings(state).bowlerId).name} runs in...`;
+    speed.textContent = `${delivery.kph} kph`;
+    scene.runUp(RUN_UP_MS);
+    later(() => {
+      const swing = bat.shot === 'leave' ? null : { shot: bat.shot, atMs: delivery.travelMs + clampMs(bat.timingMs) };
+      scene.release(delivery, { pre: result.ball, swing });
+      // The result plays out from when the bat meets the ball (or the ball passes).
+      const decided = bat.shot === 'leave' ? delivery.travelMs + 150 : delivery.travelMs + Math.max(0, clampMs(bat.timingMs));
+      later(() => afterBall(result, accuracyText), decided);
+    }, RUN_UP_MS);
   }
+
+  const clampMs = (ms) => Math.max(-TIMING_WINDOWS.edge, Math.min(TIMING_WINDOWS.edge, ms ?? 0));
 
   // At most one keyboard handler is live at a time.
   let keyHandler = null;
@@ -424,6 +409,7 @@ export function mount(root, props, navigate) {
     timeouts.clear();
     frames.clear();
     setKeyHandler(null);
+    scene.destroy();
     root.textContent = '';
   };
 }
