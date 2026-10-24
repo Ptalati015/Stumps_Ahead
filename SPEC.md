@@ -442,18 +442,19 @@ Talati's feedback: v1.0.0 is fun. Next, make bowling more customisable without r
 
 ### 13.4 Venues (Joel)
 
-- `js/data/venues.js` exports `VENUES`. Each nation gets two fictional grounds with: `id`, `nation`, `name`, `city` (fictional or generic), stand colours, and a sky tint.
-- **Starting list.** Joel checks each name with a quick web search and swaps any that turn out to be a real ground or trademark:
+Talati asked for real grounds (2026-10-24), so venues use the real, well-known name of each ground. **Use the name only**: no sponsor prefixes (for example "Lord's", not a sponsor-branded name), no ground or club logos, crests or photos. The stand colours are our own.
+
+- `js/data/venues.js` exports `VENUES`. Each nation has two grounds, and each entry has: `id`, `nation`, `name`, `city`, stand colours and a sky tint.
 
 | Nation | Ground 1 | Ground 2 |
 |---|---|---|
-| IND | Saffron Park | Monsoon Oval |
-| ENG | Ashcombe Park | Riverbend Ground |
-| AUS | Red Gum Oval | Coral Coast Stadium |
-| NZ | Fernvale Park | Harbourview Oval |
-| WI | Trade Winds Ground | Calypso Park |
-| SA | Karoo Oval | Jacaranda Park |
-| SL | Lotus Lake Stadium | Tea Hills Oval |
+| IND | Eden Gardens, Kolkata | Wankhede Stadium, Mumbai |
+| ENG | Lord's, London | The Oval, London |
+| AUS | Melbourne Cricket Ground, Melbourne | Sydney Cricket Ground, Sydney |
+| NZ | Basin Reserve, Wellington | Hagley Oval, Christchurch |
+| WI | Kensington Oval, Bridgetown | Queen's Park Oval, Port of Spain |
+| SA | Newlands, Cape Town | The Wanderers, Johannesburg |
+| SL | R. Premadasa Stadium, Colombo | Galle International Stadium, Galle |
 
 - **Where it's chosen:** a **Venue** picker on the Setup screen offers the user's two grounds first, then the opponent's two. The default is the user's first ground.
 - **Purely visual:** the venue name shows on the toss screen, the play screen header and the result screen. Stand colours and sky tint apply in the scene. It has no effect on the engine.
@@ -504,7 +505,7 @@ Joel lands the scene API stubs first, as in phase 3. Ayush's PR merges first if 
 1. Bowling still works using only the Line, Length and Bowl buttons, exactly as in v1.0.0.
 2. Dragging the ring places the ball within the limits, lights the matching buttons, and the ball visibly lands near the spot (with scatter at low accuracy). It works for left- and right-handed batters.
 3. Each variation is visible in the ball's path and changes outcomes in the direction 13.3 describes (engine tests prove the statistics).
-4. Both venues for every nation can be picked, and the name and look carry through to toss, play and result. All 14 names are fictional.
+4. Both venues for every nation can be picked, and the name and look carry through to toss, play and result. The names match the table in 13.4 and show no sponsor branding or logos.
 5. Red, white and pink are all selectable. Pink shows the night look and red and white don't. Neither the venue nor the ball changes any score for a fixed seed.
 6. `v1.0.0` shows on the menu and result screens. After the release PR it reads `v1.1.0`, and `CHANGELOG.md` lists the Phase 4 changes.
 7. No new `innerHTML`, no new dependencies, and drag handlers are removed in `unmount`. All existing tests, QA scripts and the smoke test at 375px pass with no console errors.
