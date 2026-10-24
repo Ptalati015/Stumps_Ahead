@@ -385,3 +385,124 @@ Joel lands the scene API (12.4) first with stubs that already accept the new arg
 6. Swipes don't scroll or zoom the page (`touch-action: none` on the swipe zone only), and one ball can't take two inputs.
 7. Shot buttons and keyboard shortcuts still work. All existing tests and QA scripts still pass, and the smoke test runs at 375px with no console errors.
 8. Security: no new `innerHTML`, no new dependencies, and pointer handlers are removed in `unmount`.
+
+## 13. Phase 4: bowling control, venues, ball colour, versioning (v1.1.0)
+
+Talati's feedback: v1.0.0 is fun. Next, make bowling more customisable without removing the current controls, add two home grounds per nation, let the player pick a red, white or pink ball (pink = night match), and start versioning the app. Match rules, scoring and the batting controls from section 12 stay as they are.
+
+### 13.1 Bowling control: options considered
+
+| Option | How it plays | Effort | Verdict |
+|---|---|---|---|
+| **A. Drag the landing spot** | The yellow ring on the pitch can be dragged to any spot. Line and Length buttons stay and snap the ring to presets; dragging updates which buttons are lit. | Small | **Yes** |
+| **B. Variations row** | One extra row of buttons: Stock, In, Out, Slower. In/Out means swing for pace bowlers, turn for spinners. Slower is a change of pace. | Small | **Yes** |
+| C. Swipe to bowl | Swipe on the pitch: the end point is the landing spot and the curve sets swing. | Large, fiddly on a 100 px zone, and overlaps with A | Not now |
+
+**Recommendation: ship A + B.** A gives exact placement and B gives the "dynamic" feel (setting a batter up with outswingers, then the inswinger), while the existing Line, Length, power meter and Bowl button work exactly as now. If Talati prefers only one, A alone is the smallest change.
+
+### 13.2 Bowling: what the player sees and does
+
+- **Landing spot:** the existing ring on the pitch becomes draggable (pointer drag, `touch-action: none` on the pitch area only, while the user is bowling and before Bowl is pressed).
+  - The ring is limited to the pitch: across, from 1.0 m outside off stump to 0.6 m outside leg stump; along, from 0.5 m to 12 m in front of the batter's stumps.
+  - Tapping a Line or Length button moves the ring to that preset (the current positions in `scene.js`), so nothing changes for players who never drag.
+  - While dragging, the matching Line and Length buttons light up, based on the buckets in 13.3.
+- **Variation row** under Length: **Stock** (default), **In**, **Out**, **Slower**.
+  - The labels read "Inswing"/"Outswing" for pace bowlers and "Turn in"/"Turn away" for spinners, from the batter's point of view.
+  - The scene shows the ball moving: swing curves in the air after release, turn changes direction after the bounce, and the slower ball travels visibly slower.
+- **Unchanged:** the power meter still sets accuracy. Low accuracy scatters the actual landing spot around the chosen one, as it does today with line and length.
+- **The AI bowler** also places balls with fine positions and uses variations about 30% of the time, more on Hard.
+
+### 13.3 Engine changes (Ayush), additive
+
+```js
+/** @typedef {Object} BowlInput
+ * @property {'off'|'middle'|'leg'} line
+ * @property {'yorker'|'full'|'good'|'short'} length
+ * @property {number} accuracy
+ * @property {{x:number, z:number}} [pitch]   landing spot; x metres batter-relative (+ = leg side, 0 = middle stump), z metres from the batter's stumps
+ * @property {'stock'|'in'|'out'|'slower'} [variation]
+ */
+```
+
+- When `pitch` is present it wins over `line`/`length`. The buckets used by the outcome table are:
+  - length: z < 2.5 yorker, < 5 full, < 8 good, else short
+  - line: x < -0.08 off, > 0.08 leg, else middle
+  - x < -0.9 (well outside off) is a wide.
+- **Accuracy scatter** applies to `pitch` as a continuous offset, scaled by today's `wobble`, before bucketing.
+- **Variations** shift the line bucket at the batter by one step: In toward the stumps, Out away. Their effect on outcomes:
+  - **Out:** raises the caught-behind/edge weight on a good or full length, more so if the batter's timing is early or late.
+  - **In:** raises the bowled/LBW weight on a straight line.
+  - **Slower:** travel time +25%. For the AI batter it raises the chance of early timing, and for the user it is just later. It also raises the caught weight on Loft.
+  - **Effect on the AI batter:** it reads a variation with probability `batting / 140`, and when it reads it there is no extra penalty.
+- **Delivery data for the scene:** `prepareDelivery` returns `pitch` (the actual landing spot after scatter), `variation`, `swingX` (lateral movement in metres between release and arrival) and `travelMs`, so the scene draws exactly what the engine decided.
+- **Compatibility:** if `pitch` and `variation` are left out, a fixed seed gives results identical to today.
+- **Tests:** bucket edges; scatter grows as accuracy drops; outswing raises edges and inswing raises bowled/LBW over 2,000 seeded balls; slower adds 25% to travel time; every existing test and the 270-match invariant test still pass.
+
+### 13.4 Venues (Joel)
+
+- `js/data/venues.js` exports `VENUES`. Each nation gets two fictional grounds with: `id`, `nation`, `name`, `city` (fictional or generic), stand colours, and a sky tint.
+- **Starting list.** Joel checks each name with a quick web search and swaps any that turn out to be a real ground or trademark:
+
+| Nation | Ground 1 | Ground 2 |
+|---|---|---|
+| IND | Saffron Park | Monsoon Oval |
+| ENG | Ashcombe Park | Riverbend Ground |
+| AUS | Red Gum Oval | Coral Coast Stadium |
+| NZ | Fernvale Park | Harbourview Oval |
+| WI | Trade Winds Ground | Calypso Park |
+| SA | Karoo Oval | Jacaranda Park |
+| SL | Lotus Lake Stadium | Tea Hills Oval |
+
+- **Where it's chosen:** a **Venue** picker on the Setup screen offers the user's two grounds first, then the opponent's two. The default is the user's first ground.
+- **Purely visual:** the venue name shows on the toss screen, the play screen header and the result screen. Stand colours and sky tint apply in the scene. It has no effect on the engine.
+
+### 13.5 Ball colour (Joel)
+
+- A **Ball** picker on the Setup screen offers Red, White and Pink. The default is White.
+- **Red and white** change the ball's colour in the scene and nothing else.
+- **Pink** turns on night mode in the scene: a dark sky, four floodlight towers with a soft glow, slightly brighter grass under the lights, and stand crowd dots lit. This is the only difference; it has no effect on the engine.
+
+### 13.6 Versioning
+
+- **Where the version lives:** `js/version.js` exports `VERSION`. It is `'1.0.0'` today and is added in this spec PR.
+- **Where it shows:** small, low-contrast text in the Menu screen footer, reading `v1.0.0`. It also goes in the result screen footer, so bug screenshots include it.
+- **`CHANGELOG.md`:** newest entry first. Each entry has the version, the date and a short list of changes.
+- **Scheme:** semantic versioning. A new feature bumps the minor version (1.1.0), a fix bumps the patch (1.0.1), and a breaking change or redesign bumps the major (2.0.0).
+- **Who bumps it:** Karen, in one small "Release v1.1.0" PR after the Phase 4 dev PRs merge. Dev PRs never change `VERSION`, so they can't conflict over it.
+
+### 13.7 Interfaces between tracks
+
+```js
+// MatchConfig, additive (engine ignores both)
+ * @property {string} [venueId]
+ * @property {'red'|'white'|'pink'} [ball]
+
+// Scene (Joel provides, Ayush calls from play.js)
+scene.setConditions({ venue, ball })          // on mount; pink = night mode
+scene.setMarker(delivery)                      // existing; now also accepts delivery.pitch {x, z}
+scene.enableMarkerDrag(onMove | null)          // onMove({x, z}) in batter-relative metres; null disables
+scene.release(delivery, opts)                  // existing; reads delivery.pitch, variation, swingX
+```
+
+`scene.enableMarkerDrag` does the inverse projection and clamping (13.2 limits). play.js only maps `{x, z}` to buttons and to `BowlInput.pitch`.
+
+### 13.8 File ownership for this phase
+
+| Ayush | Joel |
+|---|---|
+| `js/engine/outcomes.js`, `match.js`, `ai.js`, engine tests | `js/ui/scene/*` (drag, swing/turn path, ball colour, night mode, venue look) |
+| `js/ui/screens/play.js` (drag wiring, variation row, labels) | `js/data/venues.js` + test that the names are unique and there are 2 per nation |
+| `js/types.js` (`BowlInput` additions) | `js/ui/screens/setup.js`, `toss.js`, `result.js`, `menu.js` (pickers, venue name, version footer) |
+| | `js/types.js` (`MatchConfig` additions), `css/*` |
+
+Joel lands the scene API stubs first, as in phase 3. Ayush's PR merges first if both touch `js/types.js`. Karen's release PR goes last.
+
+### 13.9 Done when (Violet and Mark)
+
+1. Bowling still works using only the Line, Length and Bowl buttons, exactly as in v1.0.0.
+2. Dragging the ring places the ball within the limits, lights the matching buttons, and the ball visibly lands near the spot (with scatter at low accuracy). It works for left- and right-handed batters.
+3. Each variation is visible in the ball's path and changes outcomes in the direction 13.3 describes (engine tests prove the statistics).
+4. Both venues for every nation can be picked, and the name and look carry through to toss, play and result. All 14 names are fictional.
+5. Red, white and pink are all selectable. Pink shows the night look and red and white don't. Neither the venue nor the ball changes any score for a fixed seed.
+6. `v1.0.0` shows on the menu and result screens. After the release PR it reads `v1.1.0`, and `CHANGELOG.md` lists the Phase 4 changes.
+7. No new `innerHTML`, no new dependencies, and drag handlers are removed in `unmount`. All existing tests, QA scripts and the smoke test at 375px pass with no console errors.
