@@ -18,7 +18,7 @@ const HOW_TO = [
   ['Bowling', [
     'Pick Side, Line, Length and Variation, or drag the ring to pitch the ball anywhere.',
     'Tap Bowl to start the meter, and tap again as close to the green as you can.',
-    'A ball passing outside the dashed line is a wide, so watch the crease marker.',
+    'A ball that reaches the batter well outside off or down the leg side is a wide. Bowling around the wicket can angle it there.',
   ]],
 ];
 

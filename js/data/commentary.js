@@ -80,7 +80,7 @@ export const COMMENTARY = {
   caught: [
     'Caught! {fielder} takes it {where}.',
     'Up in the air... and {fielder} holds on!',
-    '{batter} picks out {fielder} {where}. Gone.',
+    '{batter} picks out {fielder}. Gone.',
     'Straight down the throat of {fielder}.',
   ],
   caught_behind: [
