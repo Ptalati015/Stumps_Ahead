@@ -634,7 +634,7 @@ Only an explicit `side` sets the angle effect, so an input without `side` plays 
 
 | Ayush | Joel |
 |---|---|
-| `js/engine/outcomes.js`, `match.js`, `ai.js`, engine tests | `js/ui/scene/scene.js`, except `deliveryPath()` (run-up and umpire mirroring, `showAim` removal, wide drawing from `arrivalX` ) |
+| `js/engine/outcomes.js`, `match.js`, `ai.js`, engine tests | `js/ui/scene/scene.js`, except `deliveryPath()` (run-up and umpire mirroring, `showAim` removal, wide drawing from `arrivalX`) |
 | `deliveryPath()` + `tests/scene-path.test.js` (releaseX) | `css/play.css` (Over/Around toggle styling, removed Aerial toggle) |
 | `js/ui/screens/play.js` (toggle, swipe removal, hint), `js/ui/input/swipe.js` | |
 | `js/types.js` (`BowlInput.side`, delivery `releaseX`/`arrivalX`) | |
