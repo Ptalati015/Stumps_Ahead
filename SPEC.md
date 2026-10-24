@@ -564,3 +564,94 @@ After both PRs merge, Karen bumps `VERSION` to `1.2.0` and adds a CHANGELOG entr
 4. On every length, inswing and outswing bowled from both ends to right- and left-handed batters stays on the pitch. The swing reads as a smooth late curve, with no detour.
 5. Seeded match results are identical to v1.1.0, because the engine is unchanged.
 6. No new `innerHTML` (the SVG is built with the existing helpers), no new dependencies, taglines are our own words, and no logos are used. All tests, the QA scripts and the smoke test pass.
+
+## 15. v1.3.0: fair wides, over/around the wicket, simpler batting input
+
+Talati's feedback on v1.2.0 covers three things. Some balls on middle stump, including yorkers, are called wide. Bowlers should be able to switch sides, as in every cricket game. The batting drag with the yellow aim arrow should go for now, and a better control will come later. Scoring otherwise stays as it is.
+
+### 15.1 Wides: only when the ball is actually wide (Ayush)
+
+**Cause:** `prepareDelivery()` in `js/engine/outcomes.js` rolls a random wide on every ball. The chance is `0.012 + wobble * 0.08`, plus extra for leg, whatever the ball's line, so even a ball on the stumps can be called wide. Only drag-placed balls also check a position (`pitch.x < WIDE_X`).
+
+**Fix:** remove the random wide roll. A wide is decided only from where the ball **arrives at the batting crease**: the final x after scatter and after any swing or turn, measured relative to the batter's normal guard and mirrored for left-handers.
+- **Off-side wide:** x < -0.90 m, the existing `WIDE_X` (the guideline about 0.9 m outside middle stump).
+- **Leg-side wide:** x > +0.45 m, clearly down leg past leg stump at about +0.11.
+- **Never a wide:** anything with |x| ≤ 0.45 m on the off side, and every ball on the stumps line (|x| ≤ 0.2), whatever its length or variation. That includes yorkers.
+- **How wides still happen:** inaccuracy. Low meter accuracy scatters the arrival point, and a scatter past a wide line makes the ball a wide. Preset (button) deliveries get a continuous arrival x from their line plus scatter, so the same rule applies to them.
+- **No-balls:** they stay a small random overstep chance, because a no-ball is about the front foot, not the line. The overstep is rolled first, and a no-ball is never also a wide.
+- **Angle and the ring (Talati, 2026-10-24):** the real angle stays. A ring placed on the stumps can still arrive wide when the angle carries it past a wide line, for example around the wicket to a left-hander with a short ball on middle. To make this visible before the ball is bowled, a small **arrival marker** at the batter's crease shows where the ball will reach the batter. It appears while the user places the ring or changes Line, Length, Variation or Side, at 100% accuracy and including the expected swing. It turns red when that point is past a wide line.
+  - play.js (Ayush) computes the point with the existing `releaseXFor` and `arrivalFromPitch` helpers in outcomes.js, plus the expected swing.
+  - The scene (Joel) draws it with `scene.setArrivalMarker({ x, wide } | null)`.
+  - It is hidden while the user bats and once the ball is released.
+- The ring's nearest legal spot is now 1.5 m in front of the batter's stumps (`PITCH_LIMITS.zMin`, was 0.5 m), so it can't sit behind the crease. The yorker bucket is still z < 2.5.
+- **Scene:** the scene draws the wide where the engine put it, from `delivery.arrivalX`, which is added to the returned delivery. It no longer uses a fixed off or leg position.
+- **Balance:** compare wides per over against v1.2.0, AI vs AI on Normal. It should stay within about ±30%. If it falls a lot, raise the scatter slightly rather than bringing back random wides.
+
+### 15.2 Over and around the wicket (Ayush engine and play.js, Joel scene)
+
+**Control:** an **Over / Around** toggle in the bowling controls, above Line. The default is Over. It can be changed before any ball, and it carries over to the next ball until it is changed again. The commentary notes a change: "<Bowler> switches to around the wicket."
+
+**Engine:** `BowlInput.side: 'over'|'around'` is optional. Leaving it out means 'over', with identical seeded results. `prepareDelivery` returns `side` and `releaseX`, the release point across the crease in metres, batter-relative:
+
+| Bowler side | Right-hand batter | Left-hand batter |
+|---|---|---|
+| Over the wicket (right-arm bowler) | about -0.25 m (off side), angling in | about +0.25 m (leg side), angling across |
+| Around the wicket | about +0.85 m (leg side), angling across | about -0.85 m (off side), angling in |
+
+**Effect:** the angle matters, but only a little.
+- **Angling in** (over to a right-hander, or around to a left-hander; released from the batter's off side): bowled/LBW weight on straight lines up 10%.
+- **Angling across:** edge weight on an off-stump line up 10%.
+- **Wides:** the 15.1 rule applies to the arrival point, which already includes the angle.
+
+Only an explicit `side` sets the angle effect, so an input without `side` plays exactly as v1.2.0 apart from the 15.1 wide rule. The AI always sends a side.
+
+**AI bowler:** it bowls over by default. It goes around for about 30% of overs to a left-hander and about 15% to a right-hander, chosen per over.
+
+**Scene (Joel):**
+- the run-up, the bound, the delivery stride and the follow-through mirror to the other side of the stumps for around;
+- the umpire stands on the opposite side from the bowler;
+- the ball leaves from `delivery.releaseX`.
+
+`deliveryPath()` (Ayush, as in 14.2) takes its release x from `delivery.releaseX`, defaulting to the current -0.25. Keep the 14.2 pitch clamp.
+
+### 15.3 Remove swipe-to-hit and the aim arrow (Ayush play.js and swipe.js, Joel scene)
+
+**Removed:**
+- swipe-to-hit;
+- the live yellow aim arrow (`scene.showAim`);
+- the Aerial toggle, which only applied to swipes.
+
+**Kept:**
+- the shot buttons (Defend, Drive, Cut, Pull, Loft) with their default directions, and the keyboard shortcuts;
+- moving the batter with ◀ ▶ and by dragging before release (12.1). The drag zone stays for that, but after release it no longer reads a swipe;
+- the hit line on the field cam after the shot, and every shot animation.
+- lofted shots, through the **Loft** button. It always plays `aerial: true` and keeps the visible lofted flight from 12.1, so removing the Aerial toggle doesn't remove lofting.
+
+**Code:**
+- `js/ui/input/swipe.js` keeps only the move helpers (`dragToOffset`, `clampOffset`), or they move into play.js. Remove `swipeToAim` and its tests.
+- `scene.showAim` and the arrow drawing are deleted.
+- The play hint text becomes "Move before the ball, then tap a shot."
+- The engine's `BatInput.aimDeg` and `aerial` stay, filled from the button defaults, so a better aiming control can come back later without engine work.
+
+### 15.4 File ownership for this phase
+
+| Ayush | Joel |
+|---|---|
+| `js/engine/outcomes.js`, `match.js`, `ai.js`, engine tests | `js/ui/scene/scene.js`, except `deliveryPath()` (run-up and umpire mirroring, `showAim` removal, wide drawing from `arrivalX`, `setArrivalMarker`) |
+| `deliveryPath()` + `tests/scene-path.test.js` (releaseX) | `css/play.css` (Over/Around toggle styling, removed Aerial toggle) |
+| `js/ui/screens/play.js` (toggle, swipe removal, hint), `js/ui/input/swipe.js` | |
+| `js/types.js` (`BowlInput.side`, delivery `releaseX`/`arrivalX`) | |
+
+Ayush's PR merges first. Karen bumps `VERSION` to `1.3.0` and adds a CHANGELOG entry in the spec PR, which merges last.
+
+### 15.5 Done when (Violet and Mark)
+
+1. **Wides:** across every line, length, variation, both sides and both handedness, over 2,000 seeded balls per combination:
+   - no ball whose arrival |x| ≤ 0.45 m on the off side or ≤ 0.2 m on the stumps line is ever a wide;
+   - every wide is beyond a wide line;
+   - wides per over stay within about ±30% of v1.2.0.
+2. **Yorkers and the arrival marker:** a yorker on middle at 100% accuracy is never a wide unless the arrival marker showed red. At 100% accuracy the swing amount is exactly 0.325 m, and the spread (0.25 to 0.40 m) grows as accuracy drops, using the same rng draws. So the marker matches the engine's arrival point to within 0.05 m for every side, handedness, length and variation, and turns red exactly when that point is past a wide line.
+3. **Over/Around:** the toggle works and persists between balls. The bowler visibly runs in from the chosen side and the umpire swaps. The ball angles in for over to a right-hander and around to a left-hander, and across for around to a right-hander and over to a left-hander. It stays on the pitch except for wides.
+4. **Batting input:** there is no swipe-to-hit, no aim arrow and no Aerial toggle. Every shot button still works and the hit line still shows. Moving the batter by ◀ ▶ and by drag works before release.
+5. **Compatibility:** seeded results without the `side` field match v1.2.0, apart from the intended wide-rule change.
+6. **Security and quality:** no new `innerHTML` or dependencies, and removed handlers are gone from `unmount`. All tests, the QA scripts and the smoke test at 375 px pass.
