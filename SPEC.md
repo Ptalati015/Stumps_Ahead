@@ -667,11 +667,11 @@ This is the "better option later" Talati asked for when the swipe and the yellow
 
 | | | |
 |---|---|---|
-| Cover | Straight | Mid-wicket |
-| Point | **Auto** | Square leg |
-| Third man | (empty) | Fine leg |
+| Mid-wicket | Straight | Cover |
+| Square leg | **Auto** | Point |
+| Fine leg | (empty) | Third man |
 
-That table is for a right-hander, where the off side is on the left of the pad. For a left-hander the pad mirrors left to right so the off side always matches the screen; use the same `screenLeftSign` as the move buttons. Each cell is at least 44 × 44 CSS px. The selected cell is highlighted, and every cell has an `aria-label` and `aria-pressed`.
+That table is for a right-hander. In the batting camera a right-hander's off side is on the right of the screen, so it is on the right of the pad too. For a left-hander the pad mirrors left to right so the off side always matches the screen; use the same `screenLeftSign` as the move buttons. Each cell is at least 44 × 44 CSS px. The selected cell is highlighted, and every cell has an `aria-label` and `aria-pressed`.
 
 **Behaviour:**
 - **Auto** is the default. It means "each shot's own default direction" (`DEFAULT_AIM`), which is exactly today's game.
