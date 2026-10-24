@@ -269,6 +269,7 @@ export function createScene(host) {
   // diamond on the popping crease, above the actors so the batter never hides
   // it. Neutral, or red when that point is past a wide line.
   const arrivalG = svg('g', { class: 'sc-arrival', visibility: 'hidden', 'pointer-events': 'none' }, pitchCam);
+  const arrivalHalo = svg('line', { 'stroke-linecap': 'round' }, arrivalG);
   const arrivalPost = svg('line', { 'stroke-linecap': 'round' }, arrivalG);
   const arrivalTip = svg('polygon', {}, arrivalG);
   let arrival = null;
@@ -556,10 +557,16 @@ export function createScene(host) {
     const wx = arrival.x * -off;
     const [gx, gy, sc] = project(wx, 0, CREASE_Z);
     const [, ty] = project(wx, STUMP_H, CREASE_Z);
-    const color = arrival.wide ? '#ff4d4d' : '#eef3ff';
-    const w = Math.max(1.6, 0.1 * sc);
-    set(arrivalPost, { x1: gx, y1: gy, x2: gx, y2: ty, stroke: color, 'stroke-width': Math.max(0.8, 0.025 * sc), 'stroke-dasharray': `${(0.06 * sc).toFixed(1)} ${(0.05 * sc).toFixed(1)}` });
-    set(arrivalTip, { points: pts([[gx, gy - w * 0.7], [gx + w, gy], [gx, gy + w * 0.7], [gx - w, gy]]), fill: color, stroke: arrival.wide ? '#7a0c14' : '#3a4a5c', 'stroke-width': 0.5 });
+    // Light blue, not white, so it stands off the pads and crease lines. The
+    // floors keep it readable at the far end on a phone (~0.66 px per unit).
+    const color = arrival.wide ? '#ff4d4d' : '#9fe0ff';
+    const edge = arrival.wide ? '#5c0a12' : '#0d2f45';
+    const w = Math.max(4.5, 0.1 * sc);
+    const lw = Math.max(1.4, 0.025 * sc);
+    const top = Math.min(ty, gy - 3.2 * w);
+    set(arrivalHalo, { x1: gx, y1: gy, x2: gx, y2: top, stroke: edge, 'stroke-width': lw + 1.2, 'stroke-opacity': 0.55 });
+    set(arrivalPost, { x1: gx, y1: gy, x2: gx, y2: top, stroke: color, 'stroke-width': lw, 'stroke-dasharray': `${Math.max(2.4, 0.06 * sc).toFixed(1)} ${Math.max(1.8, 0.05 * sc).toFixed(1)}` });
+    set(arrivalTip, { points: pts([[gx, gy - w * 0.7], [gx + w, gy], [gx, gy + w * 0.7], [gx - w, gy]]), fill: color, stroke: edge, 'stroke-width': 0.9 });
     arrivalG.setAttribute('visibility', 'visible');
   }
 
