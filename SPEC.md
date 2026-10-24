@@ -578,7 +578,7 @@ Talati's feedback on v1.2.0 covers three things. Some balls on middle stump, inc
 - **Leg-side wide:** x > +0.45 m, clearly down leg past leg stump at about +0.11.
 - **Never a wide:** anything with |x| ≤ 0.45 m on the off side, and every ball on the stumps line (|x| ≤ 0.2), whatever its length or variation. That includes yorkers.
 - **How wides still happen:** inaccuracy. Low meter accuracy scatters the arrival point, and a scatter past a wide line makes the ball a wide. Preset (button) deliveries get a continuous arrival x from their line plus scatter, so the same rule applies to them.
-- **No-balls:** they stay a small random overstep chance, because a no-ball is about the front foot, not the line.
+- **No-balls:** they stay a small random overstep chance, because a no-ball is about the front foot, not the line. The overstep is rolled first, and a no-ball is never also a wide.
 - **Scene:** the scene draws the wide where the engine put it, from `delivery.arrivalX`, which is added to the returned delivery. It no longer uses a fixed off or leg position.
 - **Balance:** compare wides per over against v1.2.0, AI vs AI on Normal. It should stay within about ±30%. If it falls a lot, raise the scatter slightly rather than bringing back random wides.
 
@@ -597,6 +597,8 @@ Talati's feedback on v1.2.0 covers three things. Some balls on middle stump, inc
 - **Angling in** (around to a right-hander, or over to a left-hander): bowled/LBW weight on straight lines up 10%.
 - **Angling across:** edge weight on an off-stump line up 10%.
 - **Wides:** the 15.1 rule applies to the arrival point, which already includes the angle.
+
+Only an explicit `side` sets the angle effect, so an input without `side` plays exactly as v1.2.0 apart from the 15.1 wide rule. The AI always sends a side.
 
 **AI bowler:** it bowls over by default. It goes around for about 30% of overs to a left-hander and about 15% to a right-hander, chosen per over.
 
