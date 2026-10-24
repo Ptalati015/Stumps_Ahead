@@ -725,7 +725,27 @@ export function createScene(host) {
   hideBall();
   hideFieldBall();
 
-  return { newBall, setMarker, hideMarker, runUp, release, swing: swingBat, outcome, destroy };
+  // ---- Phase 3 API (SPEC 12.4). Stubs for now: they accept the new
+  // arguments so play.js can be wired against them. ----
+  let camMode = 'bowling';
+  let batSide = 'R';
+  let batOffset = 0;
+  function setCamera(mode) {
+    camMode = mode === 'batting' ? 'batting' : 'bowling';
+  }
+  function setBatterStance({ bats = 'R', offsetX = 0 } = {}) {
+    batSide = bats === 'L' ? 'L' : 'R';
+    batOffset = Math.max(-0.6, Math.min(0.6, offsetX));
+  }
+  function showAim(aim) {
+    void aim;
+  }
+  function swing(shot, opts = {}) {
+    void opts;
+    swingBat(shot);
+  }
+
+  return { newBall, setMarker, hideMarker, runUp, release, swing, outcome, destroy, setCamera, setBatter: setBatterStance, showAim };
 
   // ---- Static drawing ----
   function makeStumps(parent, z) {
