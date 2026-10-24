@@ -986,7 +986,21 @@ export function createScene(host) {
   }
   rebuildBackground();
 
-  return { newBall, setMarker, hideMarker, runUp, release, swing: swingBat, outcome, destroy, setCamera, setBatter, showAim };
+  // ---- Phase 4 API (SPEC 13.7). Stubs for now: they accept the new
+  // arguments so play.js can be wired against them. ----
+  let conditions = { venue: null, ball: 'white' };
+  function setConditions({ venue = null, ball = 'white' } = {}) {
+    conditions = { venue, ball };
+  }
+  let markerDrag = null;
+  function enableMarkerDrag(onMove) {
+    markerDrag = typeof onMove === 'function' ? onMove : null;
+  }
+
+  return {
+    newBall, setMarker, hideMarker, runUp, release, swing: swingBat, outcome, destroy,
+    setCamera, setBatter, showAim, setConditions, enableMarkerDrag,
+  };
 
   // ---- Static drawing ----
   function makeStumps(parent, z) {
