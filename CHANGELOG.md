@@ -2,6 +2,13 @@
 
 All notable changes to Stumps Ahead. Versions follow semantic versioning: features bump the minor version, fixes the patch.
 
+## 1.4.0 - 2026-10-24
+
+- Batting direction pad: pick where to hit (cover, straight, mid-wicket, point, square leg, third man, fine leg, or Auto) next to the shot buttons. It stays set between balls, and each shot only goes where that shot can go. Aiming against the line of the ball is a little riskier. Auto plays exactly as before.
+- Richer commentary: several lines for every kind of ball, fewer repeats, and lines that say where a fielded ball went.
+- Milestones: fifties, hundreds, three- and five-wicket hauls, hat-trick balls and hat-tricks, maidens and 50 partnerships get a line, and the big ones get a banner. The last over and the winning runs get a line too.
+- Pause: a pause button during the match opens the full scorecard, a short how-to-play, Resume, and Quit to menu (with a confirm).
+
 ## 1.3.1 - 2026-10-24
 
 - The arrival marker at the batter's crease is removed from the play view. Wides are still decided by where the ball reaches the batter; the engine just keeps that to itself.
