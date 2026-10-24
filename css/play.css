@@ -230,3 +230,11 @@
   .pl-flash small { font-size: 18px; }
   .pl-speed { top: 14px; right: 18px; font-size: 18px; }
 }
+
+/* Phones: one row of five shot buttons so the scene (and its swipe zone)
+   keeps most of the height once the move/Aerial row is shown. */
+@media (max-width: 899px) {
+  .pl-shots { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+  .pl-shot { min-height: 48px; padding: 6px 2px; font-size: 15px; }
+  .pl-shots .pl-hint { font-size: 13px; }
+}

@@ -318,3 +318,12 @@ test('a batter moved to the leg side is bowled more often by a straight ball', (
     assert.ok(exposed > guard * 1.5, `${bat.shot}: ${guard} -> ${exposed}`);
   }
 });
+
+test('drive commentary follows where the ball went', () => {
+  const s = started();
+  const words = { 0: 'straight drive', [-40]: 'cover drive', 30: 'on drive' };
+  for (const [aim, word] of Object.entries(words)) {
+    const { ball } = findBall(s, (r) => r.ball.runs === 4 && r.ball.timing === 'perfect' && !r.ball.extra, { shot: 'drive', timingMs: 0, aimDeg: Number(aim) });
+    assert.match(ball.commentary, new RegExp(word, 'i'));
+  }
+});

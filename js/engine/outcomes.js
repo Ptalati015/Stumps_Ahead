@@ -297,7 +297,17 @@ const SHOT_WORDS = {
 };
 
 /** Commentary line for a ball. Names are plain strings; UI must render with textContent. */
-export function commentaryFor({ runs, extra, wicketKind, timing, shot }, names, rng) {
+// Drive wording follows where the ball actually went (batter-relative angle).
+function driveWords(angleDeg) {
+  if (angleDeg == null) return null;
+  if (angleDeg >= -15 && angleDeg <= 15) return 'a crisp straight drive';
+  if (angleDeg < -15 && angleDeg >= -60) return 'a glorious cover drive';
+  if (angleDeg < -60) return 'a punchy square drive';
+  if (angleDeg <= 45) return 'a lovely on drive';
+  return 'a flick off the pads';
+}
+
+export function commentaryFor({ runs, extra, wicketKind, timing, shot, angleDeg = null }, names, rng) {
   const { batter = 'The batter', bowler = 'the bowler', fielder = 'the fielder' } = names ?? {};
   if (extra === 'wide') return `Wide from ${bowler}.`;
   const prefix = extra === 'noball' ? 'No ball! ' : '';
@@ -311,7 +321,9 @@ export function commentaryFor({ runs, extra, wicketKind, timing, shot }, names, 
     return lines[wicketKind];
   }
   if (shot === 'leave') return `${prefix}${batter} leaves it alone.`;
-  const how = rng.pick(SHOT_WORDS[shot] ?? ['a shot']);
+  // Always draw, so the match rng stream is the same whatever the wording.
+  const picked = rng.pick(SHOT_WORDS[shot] ?? ['a shot']);
+  const how = (shot === 'drive' && driveWords(angleDeg)) || picked;
   const timingNote = timing === 'early' ? ' Through early.' : timing === 'late' ? ' A touch late.' : timing === 'miss' ? ' Beaten!' : '';
   if (runs === 6) return `${prefix}SIX! ${batter} with ${how}, into the stands!`;
   if (runs === 4) return `${prefix}FOUR! ${how[0].toUpperCase() + how.slice(1)} from ${batter}.`;

@@ -176,19 +176,20 @@ export function playBall(state, bowl, bat) {
     inn.wickets += 1;
   }
 
+  // Where the ball went, for the scene (SPEC 12.2). Its own rng stream, so
+  // it never changes the score.
+  const flight = shotFlight({ outcome, bat, extra: delivery.extra }, forkRng(state.rngState, SALT_FLIGHT));
   const ball = {
     runs: outcome.runs,
     extra: delivery.extra ? { type: delivery.extra, runs: 1 } : null,
     wicket,
     timing: outcome.timing,
     commentary: commentaryFor(
-      { runs: outcome.runs, extra: delivery.extra, wicketKind: outcome.wicketKind, timing: outcome.timing, shot: outcome.shot },
+      { runs: outcome.runs, extra: delivery.extra, wicketKind: outcome.wicketKind, timing: outcome.timing, shot: outcome.shot, angleDeg: flight.angleDeg },
       { batter: batter.name, bowler: bowler.name, fielder: fielder.name },
       rng,
     ),
-    // Where the ball went, for the scene (SPEC 12.2). Its own rng stream, so
-    // it never changes the score.
-    ...shotFlight({ outcome, bat, extra: delivery.extra }, forkRng(state.rngState, SALT_FLIGHT)),
+    ...flight,
     // Extra fields for the play screen.
     shot: outcome.shot,
     delivery,

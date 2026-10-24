@@ -261,16 +261,15 @@ export function mount(root, props, navigate) {
     const moveRight = button('pl-btn pl-move pl-move-right', '▶', () => step(-1));
     moveLeft.setAttribute('aria-label', 'Move batter left');
     moveRight.setAttribute('aria-label', 'Move batter right');
-    const loftBtn = button('pl-btn pl-loft', 'Loft', () => {
+    const loftBtn = button('pl-btn pl-loft', 'Aerial', () => {
       loftOn = !loftOn;
       loftBtn.setAttribute('aria-pressed', String(loftOn));
       loftBtn.classList.toggle('pl-picked', loftOn);
     });
     loftBtn.setAttribute('aria-pressed', String(loftOn));
     loftBtn.classList.toggle('pl-picked', loftOn);
-    loftBtn.title = 'Swipes go in the air';
+    loftBtn.title = 'When on, every swipe is played in the air';
     const moveRow = el('div', 'pl-move-row');
-    Object.assign(moveRow.style, { gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 2fr 1fr', gap: '8px' });
     moveRow.append(moveLeft, loftBtn, moveRight);
 
     const buttons = SHOTS.map((shot) => {
@@ -281,7 +280,7 @@ export function mount(root, props, navigate) {
       return b;
     });
     controls.append(moveRow, ...buttons);
-    const hint = el('p', 'pl-hint', 'Drag or ◀ ▶ to move before the ball. Then swipe on the pitch to hit, tap to defend, or use a shot button.');
+    const hint = el('p', 'pl-hint', 'Move before the ball, then swipe the pitch to hit or tap to defend.');
     controls.append(hint);
 
     // Swipe zone: lower half of the delivery view.
