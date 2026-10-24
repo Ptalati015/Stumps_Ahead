@@ -40,7 +40,8 @@ export function travelTimeMs(kph) {
 // pitch.x: metres batter-relative, + = leg side, 0 = middle stump.
 // pitch.z: metres in front of the batter's stumps.
 export const VARIATIONS = ['stock', 'in', 'out', 'slower'];
-export const PITCH_LIMITS = { xMin: -1.0, xMax: 0.6, zMin: 0.5, zMax: 12 };
+// zMin keeps every ball pitching in front of the popping crease (1.22 m).
+export const PITCH_LIMITS = { xMin: -1.0, xMax: 0.6, zMin: 1.5, zMax: 12 };
 export const WIDE_X = -0.9;
 // A ball arriving past this, down leg, is a wide (SPEC 15.1).
 export const LEG_WIDE_X = 0.45;
@@ -78,6 +79,33 @@ export function pitchForArrival(releaseX, arrivalX, z) {
 }
 
 export const isWideAt = (x) => x < WIDE_X || x > LEG_WIDE_X;
+
+// Average of the 0.25..0.4 m swing/turn prepareDelivery rolls.
+export const EXPECTED_SWING_M = 0.325;
+
+/**
+ * Where a delivery is expected to reach the batter at 100% accuracy, for the
+ * arrival marker while the user sets the ball up (SPEC 15.1). A placed ball
+ * carries on from the release point through the spot plus the average swing;
+ * a button ball arrives on its (swung) line.
+ * @returns {{x:number, releaseX:number, wide:boolean}}
+ */
+export function expectedArrival(bowl, bats) {
+  const side = SIDES.includes(bowl?.side) ? bowl.side : 'over';
+  const variation = VARIATIONS.includes(bowl?.variation) ? bowl.variation : 'stock';
+  const releaseX = releaseXFor(side, bats);
+  let x;
+  if (bowl?.pitch && Number.isFinite(bowl.pitch.x) && Number.isFinite(bowl.pitch.z)) {
+    const { xMin, xMax, zMin, zMax } = PITCH_LIMITS;
+    const swing = variation === 'in' ? EXPECTED_SWING_M : variation === 'out' ? -EXPECTED_SWING_M : 0;
+    x = arrivalFromPitch(releaseX, clamp(bowl.pitch.x, xMin, xMax), clamp(bowl.pitch.z, zMin, zMax)) + swing;
+  } else {
+    const line = LINES.includes(bowl?.line) ? bowl.line : 'off';
+    x = LINE_AT_CREASE[swungLine(line, variation)];
+  }
+  x = Math.round(x * 100) / 100;
+  return { x, releaseX, wide: isWideAt(x) };
+}
 
 export function lengthFromZ(z) {
   if (z < 2.5) return 'yorker';
@@ -122,7 +150,7 @@ export function prepareDelivery(bowl, bowler, rng, batter = null) {
     // A chosen landing spot scatters continuously, then is bucketed.
     const { xMin, xMax, zMin, zMax } = PITCH_LIMITS;
     const x = clamp(bowl.pitch.x, xMin, xMax) + rng.normal() * wobble * 0.35;
-    const z = clamp(clamp(bowl.pitch.z, zMin, zMax) + rng.normal() * wobble * 2.2, 0.2, 13);
+    const z = clamp(clamp(bowl.pitch.z, zMin, zMax) + rng.normal() * wobble * 2.2, zMin, 13);
     pitch = { x: Math.round(x * 100) / 100, z: Math.round(z * 100) / 100 };
     length = lengthFromZ(pitch.z);
   } else {
@@ -169,8 +197,11 @@ export function prepareDelivery(bowl, bowler, rng, batter = null) {
   }
   arrivalX = Math.round(arrivalX * 100) / 100;
   if (isWideAt(arrivalX) && extra !== 'noball') extra = 'wide';
-  // Only an explicit side changes outcomes, so v1.2 inputs play as before.
-  const angle = bowl.side == null ? null : (side === 'around') === (bats === 'R') ? 'in' : 'across';
+  // Released from the batter's off side (over to a right-hander, around to a
+  // left-hander) the ball angles in at the stumps; from the leg side it
+  // angles across. Only an explicit side changes outcomes, so v1.2 inputs
+  // play as before.
+  const angle = bowl.side == null ? null : releaseX < 0 ? 'in' : 'across';
   return { line, length, kph, travelMs, extra, pitch, variation, swingX, side, releaseX, arrivalX, angle };
 }
 

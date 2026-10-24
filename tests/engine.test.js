@@ -450,7 +450,7 @@ test('the AI bowler uses fine spots and variations about 30% of the time', () =>
 });
 
 // ---- SPEC 15: wides from the arrival point, over/around the wicket ----
-import { WIDE_X, LEG_WIDE_X, releaseXFor, arrivalFromPitch, VARIATIONS } from '../js/engine/outcomes.js';
+import { WIDE_X, LEG_WIDE_X, releaseXFor, arrivalFromPitch, VARIATIONS, expectedArrival, EXPECTED_SWING_M } from '../js/engine/outcomes.js';
 import { aiSide } from '../js/engine/ai.js';
 
 const PACE = { bowling: 80, bowlType: 'pace' };
@@ -495,10 +495,11 @@ test('over and around set the release point, mirrored for a left-hander', () => 
   assert.equal(d({ side: 'around' }, 'R').releaseX, 0.85);
   assert.equal(d({ side: 'around' }, 'L').releaseX, -0.85);
   assert.equal(d({}, 'R').angle, null, 'no side given: plays as v1.2');
-  assert.equal(d({ side: 'around' }, 'R').angle, 'in');
-  assert.equal(d({ side: 'over' }, 'L').angle, 'in');
-  assert.equal(d({ side: 'over' }, 'R').angle, 'across');
-  assert.equal(d({ side: 'around' }, 'L').angle, 'across');
+  // Released from the off side the ball angles in; from the leg side, across.
+  assert.equal(d({ side: 'over' }, 'R').angle, 'in');
+  assert.equal(d({ side: 'around' }, 'L').angle, 'in');
+  assert.equal(d({ side: 'around' }, 'R').angle, 'across');
+  assert.equal(d({ side: 'over' }, 'L').angle, 'across');
   // A placed ball carries on along its line from the release point.
   const placed = d({ side: 'around', pitch: { x: 0, z: 6.4 }, accuracy: 1 }, 'R');
   assert.ok(Math.abs(placed.arrivalX - Math.round(arrivalFromPitch(0.85, 0, 6.4) * 100) / 100) < 1e-9);
@@ -564,4 +565,32 @@ test('AI vs AI wides per over stay close to v1.2 (0.196 on Normal)', () => {
   }
   const perOver = wides / (legal / 6);
   assert.ok(perOver > 0.137 && perOver < 0.255, `wides per over ${perOver}`);
+});
+
+test('a scattered ball always pitches in front of the crease', () => {
+  for (let i = 0; i < 3000; i++) {
+    const d = prepareDelivery({ line: 'middle', length: 'yorker', accuracy: 0, pitch: { x: 0, z: 0.5 } }, { bowling: 20 }, createRng(i + 1));
+    assert.ok(d.pitch.z >= 1.5, `pitched at ${d.pitch.z}`);
+  }
+});
+
+test('expectedArrival matches the engine at 100% accuracy: exact for a button ball, within the swing spread for a placed one', () => {
+  const TOP = { bowling: 100, bowlType: 'pace' };
+  let wides = 0;
+  for (const line of ['off', 'middle', 'leg']) for (const length of Object.keys(SPOT_Z)) for (const variation of VARIATIONS)
+    for (const side of ['over', 'around']) for (const bats of ['R', 'L']) for (const pitch of [undefined, { x: SPOT_X[line], z: SPOT_Z[length] }, { x: -0.9, z: 12 }, { x: 0.6, z: 1.5 }]) {
+      const bowl = { line, length, variation, side, accuracy: 1, pitch };
+      const want = expectedArrival(bowl, bats);
+      for (let i = 0; i < 20; i++) {
+        const d = prepareDelivery(bowl, TOP, createRng(i * 31 + 5), { bats });
+        const tol = pitch && (variation === 'in' || variation === 'out') ? 0.086 : 0.011;
+        assert.ok(Math.abs(d.arrivalX - want.x) <= tol, `${line} ${length} ${variation} ${side} ${bats} ${JSON.stringify(pitch)}: ${d.arrivalX} vs ${want.x}`);
+        assert.equal(want.releaseX, d.releaseX);
+        if (want.wide) wides++;
+      }
+    }
+  assert.ok(wides > 0, 'some far-corner spots arrive wide');
+  assert.equal(expectedArrival({ line: 'middle', length: 'yorker' }, 'R').wide, false);
+  assert.equal(expectedArrival({ pitch: { x: -0.9, z: 12 }, side: 'around' }, 'R').wide, true);
+  assert.ok(Math.abs(expectedArrival({ pitch: { x: 0, z: 6.4 }, variation: 'in' }, 'R').x - expectedArrival({ pitch: { x: 0, z: 6.4 } }, 'R').x - EXPECTED_SWING_M) < 0.011);
 });

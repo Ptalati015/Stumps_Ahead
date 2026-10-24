@@ -187,7 +187,9 @@ function arriveHeight(zb) {
 export function deliveryPath(delivery, off = -1) {
   const T = delivery.travelMs / 1000;
   const pitch = delivery.pitch && Number.isFinite(delivery.pitch.x) && Number.isFinite(delivery.pitch.z) ? delivery.pitch : null;
-  const zb = pitch ? pitch.z : BOUNCE_Z[delivery.length] ?? BOUNCE_Z.good;
+  // The bounce stays between the crease and the release, so tb and tA are
+  // never zero whatever the spot.
+  const zb = Math.min(RELEASE.z - 1, Math.max(CREASE_Z + 0.25, pitch ? pitch.z : BOUNCE_Z[delivery.length] ?? BOUNCE_Z.good));
   const hA = pitch ? arriveHeight(zb) : ARRIVE_H[delivery.length] ?? ARRIVE_H.good;
   const vz = (RELEASE.z - CREASE_Z) / T;
   const tb = (RELEASE.z - zb) / vz;

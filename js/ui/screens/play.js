@@ -6,7 +6,7 @@ import {
 } from '../../engine/match.js';
 import {
   SHOTS, SHOT_LABELS, LINES, LENGTHS, LINE_LABELS, LENGTH_LABELS, TIMING_WINDOWS, DEFAULT_AIM, OFFSET_STEP_M,
-  VARIATIONS, SIDES, lineFromX, lengthFromZ,
+  VARIATIONS, SIDES, lineFromX, lengthFromZ, expectedArrival,
 } from '../../engine/outcomes.js';
 import { createScene } from '../scene/scene.js';
 import { attachDrag, dragToOffset, clampOffset } from '../input/swipe.js';
@@ -185,6 +185,7 @@ export function mount(root, props, navigate) {
       side: isUserBatting(state) ? 'over' : bowlPick.side,
     });
     scene.setBatter?.({ bats: strikerBats(), offsetX: 0 });
+    scene.setArrivalMarker?.(null);
     flash.textContent = '';
     flash.className = 'pl-flash';
     speed.textContent = '';
@@ -401,13 +402,21 @@ export function mount(root, props, navigate) {
     controls.textContent = '';
     controls.className = 'pl-controls pl-bowling';
     const preview = () => scene.setMarker({ line: bowlPick.line, length: bowlPick.length, pitch: bowlPick.pitch, extra: null, travelMs: 1000 });
+    // Where the ball would reach the batter at 100% accuracy, so a spot that
+    // arrives wide shows as one before it is bowled (SPEC 15.1).
+    const showArrival = () => {
+      const { x, wide } = expectedArrival(bowlPick, strikerBats());
+      scene.setArrivalMarker?.({ x, wide });
+    };
     preview();
+    showArrival();
 
     const lit = {};
     const light = () => {
       for (const [key, row] of Object.entries(lit)) {
         row.querySelectorAll('button').forEach((x) => x.classList.toggle('pl-picked', x.dataset.value === bowlPick[key]));
       }
+      showArrival();
     };
     const group = (label, options, labels, key, onPick) => {
       const wrap = el('div', 'pl-seg');
@@ -508,6 +517,7 @@ export function mount(root, props, navigate) {
   function deliver(bowl) {
     setKeyHandler(null);
     scene.enableMarkerDrag?.(null);
+    scene.setArrivalMarker?.(null);
     const delivery = previewDelivery(state, bowl);
     const bat = aiBat(state, bowl);
     const result = playBall(state, bowl, bat);
@@ -549,6 +559,7 @@ export function mount(root, props, navigate) {
     setKeyHandler(null);
     detachDrag();
     scene.enableMarkerDrag?.(null);
+    scene.setArrivalMarker?.(null);
     scene.destroy();
     root.textContent = '';
   };

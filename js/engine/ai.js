@@ -2,7 +2,9 @@
 // choices come from a stream forked off the match's rng state, so calling a
 // helper twice on the same state gives the same answer.
 import { clamp, forkRng } from './rng.js';
-import { difficultyFactor, DEFAULT_AIM, swungLine, releaseXFor, pitchForArrival, LINE_AT_CREASE, PITCH_LIMITS } from './outcomes.js';
+import {
+  difficultyFactor, DEFAULT_AIM, swungLine, releaseXFor, pitchForArrival, LINE_AT_CREASE, PITCH_LIMITS, EXPECTED_SWING_M,
+} from './outcomes.js';
 import {
   availableBowlers, chaseInfo, currentInnings, playerById,
   previewDelivery, teamByCode, totalBalls, BALLS_PER_OVER,
@@ -18,7 +20,7 @@ const SALT_SIDE = 0x51de;
 const LINE_X = { off: -0.2, middle: 0, leg: 0.2 };
 const LENGTH_Z = { yorker: 1.5, full: 3.8, good: 6.4, short: 9.5 };
 // Average sideways movement of a variation at the batter (prepareDelivery).
-const EXPECTED_SWING = { in: 0.32, out: -0.32 };
+const EXPECTED_SWING = { in: EXPECTED_SWING_M, out: -EXPECTED_SWING_M };
 
 /** Rotate through the five best bowlers, preferring whoever has bowled least. */
 export function aiChooseBowler(state) {

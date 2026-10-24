@@ -153,3 +153,14 @@ test('from around the wicket every length and swing still stays on the pitch', (
     }
   }
 });
+
+test('a spot on or past the crease still gives a finite path that bounces before the batter', () => {
+  for (const z of [1.22, 0.5, 0, 19.4, 25]) {
+    const path = deliveryPath({ ...base, pitch: { x: 0, z } }, -1);
+    for (let k = 0; k < 50; k++) {
+      const p = path((path.T * k) / 49);
+      assert.ok(Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z), `z=${z}`);
+    }
+    assert.ok(path.bounce.z > 1.22 && path.bounce.z < 19.4);
+  }
+});
