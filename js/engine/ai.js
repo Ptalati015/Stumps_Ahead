@@ -2,7 +2,7 @@
 // choices come from a stream forked off the match's rng state, so calling a
 // helper twice on the same state gives the same answer.
 import { clamp, forkRng } from './rng.js';
-import { difficultyFactor, DEFAULT_AIM } from './outcomes.js';
+import { difficultyFactor, DEFAULT_AIM, swungLine } from './outcomes.js';
 import {
   availableBowlers, chaseInfo, currentInnings, playerById,
   previewDelivery, teamByCode, totalBalls, BALLS_PER_OVER,
@@ -11,6 +11,11 @@ import {
 const SALT_BOWLER = 0xb0b1;
 const SALT_BOWL = 0xb0b2;
 const SALT_BAT = 0xba77;
+const SALT_READ = 0x4ead;
+
+// Centre of each line/length bucket (SPEC 13.3), for the AI's fine placement.
+const LINE_X = { off: -0.2, middle: 0, leg: 0.2 };
+const LENGTH_Z = { yorker: 1.5, full: 3.8, good: 6.4, short: 9.5 };
 
 /** Rotate through the five best bowlers, preferring whoever has bowled least. */
 export function aiChooseBowler(state) {
@@ -44,7 +49,15 @@ export function aiBowl(state) {
   // When the AI bowls, a harder game means tighter bowling.
   const diff = difficultyFactor(state.config.difficulty);
   const accuracy = clamp(0.45 + (bowler?.bowling ?? 50) / 250 + diff * 0.07 + rng.normal() * 0.12, 0.15, 1);
-  return { line, length, accuracy };
+
+  // About 30% of balls (20% Easy, 40% Hard) use a fine landing spot and a variation.
+  if (rng.next() >= 0.3 + diff * 0.1) return { line, length, accuracy };
+  const pitch = {
+    x: Math.round((LINE_X[line] + rng.normal() * 0.06) * 100) / 100,
+    z: Math.round((LENGTH_Z[length] + rng.normal() * 0.6) * 100) / 100,
+  };
+  const variation = rng.weighted(spin ? { stock: 25, in: 30, out: 35, slower: 10 } : { stock: 15, in: 30, out: 35, slower: 20 });
+  return { line, length, accuracy, pitch, variation };
 }
 
 // 0 = block everything, 1 = swing at everything.
@@ -73,7 +86,13 @@ export function aiBat(state, bowl) {
   const delivery = previewDelivery(state, bowl);
   const rng = forkRng(state.rngState, SALT_BAT);
   const agg = aggression(state);
-  const { line, length } = delivery;
+  const { length } = delivery;
+  // The batter reads a variation with probability batting / 140. Unread
+  // swing/turn means it plays the line the ball started on; an unread slower
+  // ball means it is through the shot early.
+  const variation = delivery.variation ?? 'stock';
+  const read = variation === 'stock' || forkRng(state.rngState, SALT_READ).next() < (batter?.batting ?? 50) / 140;
+  const line = read ? delivery.line : unswing(delivery.line, variation);
 
   const weights = { defend: 0, drive: 0, pull: 0, cut: 0, loft: 0, leave: 0 };
   if (length === 'yorker') Object.assign(weights, { defend: 60, drive: 25, loft: 10 });
@@ -91,7 +110,9 @@ export function aiBat(state, bowl) {
   const diff = difficultyFactor(state.config.difficulty);
   const skill = clamp(batter?.batting ?? 50, 1, 100);
   const spread = (260 - skill * 1.3) * (1 - diff * 0.15);
-  const timingMs = Math.round(rng.normal() * spread);
+  let timingMs = Math.round(rng.normal() * spread);
+  if (!read && variation === 'slower') timingMs -= Math.round(delivery.travelMs * 0.12);
+  if (!read && (variation === 'in' || variation === 'out')) timingMs += timingMs < 0 ? -70 : 70;
 
   // Same fields a human swipe fills (SPEC 12.2), so the scene shows AI shots
   // the same way. Occasionally shuffle: across to drive, or away to free the arms.
@@ -101,4 +122,11 @@ export function aiBat(state, bowl) {
   if (move < 0.1 && shot === 'drive') offsetX = -0.15;
   else if (move > 0.93 && (shot === 'loft' || shot === 'cut')) offsetX = 0.15;
   return { shot, timingMs, offsetX, aimDeg, aerial: shot === 'loft' };
+}
+
+// The line before swing/turn moved it.
+function unswing(line, variation) {
+  if (variation === 'in') return swungLine(line, 'out');
+  if (variation === 'out') return swungLine(line, 'in');
+  return line;
 }

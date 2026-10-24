@@ -6,6 +6,7 @@ import {
 } from '../../engine/match.js';
 import {
   SHOTS, SHOT_LABELS, LINES, LENGTHS, LINE_LABELS, LENGTH_LABELS, TIMING_WINDOWS, DEFAULT_AIM, OFFSET_STEP_M,
+  VARIATIONS, lineFromX, lengthFromZ,
 } from '../../engine/outcomes.js';
 import { createScene } from '../scene/scene.js';
 import { attachSwipe, dragToOffset, clampOffset } from '../input/swipe.js';
@@ -73,10 +74,24 @@ export function mount(root, props, navigate) {
   const commentary = el('p', 'pl-comm', '');
   commentary.setAttribute('aria-live', 'polite');
   const controls = el('div', 'pl-controls');
-  scoreSlot.append(miniScore);
+  const venueLine = el('div', 'pl-venue');
+  venueLine.hidden = true;
+  scoreSlot.append(miniScore, venueLine);
+  if (state.config.venueId) {
+    import('../../data/venues.js')
+      .then((m) => {
+        const name = m.getVenue?.(state.config.venueId)?.name;
+        if (!alive || !name) return;
+        venueLine.textContent = name;
+        venueLine.hidden = false;
+      })
+      .catch(() => {});
+  }
   screen.append(scoreSlot, players, pitchWrap, overRow, commentary, controls);
   root.append(screen);
   const scene = createScene(pitchWrap);
+  // Venue look and ball colour (pink = night), before the first ball.
+  scene.setConditions?.({ venueId: state.config.venueId ?? null, ball: state.config.ball ?? 'white' });
   // Lower half of the delivery view takes drags and swipes (SPEC 12.1).
   // Positioned through CSSOM so it works under the strict CSP; Joel styles .pl-swipe.
   const swipeZone = el('div', 'pl-swipe');
@@ -386,32 +401,65 @@ export function mount(root, props, navigate) {
     controls.append(list);
   }
 
-  // User bowls: line, length, then stop the power meter.
-  const bowlPick = { line: 'off', length: 'good' };
+  // User bowls: line, length (or drag the landing ring), a variation, then
+  // stop the power meter. pitch is set only after a drag; a Line/Length tap
+  // clears it so the ring snaps back to the preset.
+  const bowlPick = { line: 'off', length: 'good', pitch: null, variation: 'stock' };
+  const VARIATION_LABELS = {
+    pace: { stock: 'Stock', in: 'Inswing', out: 'Outswing', slower: 'Slower' },
+    spin: { stock: 'Stock', in: 'Turn in', out: 'Turn away', slower: 'Slower' },
+  };
   function showBowlingControls() {
     controls.textContent = '';
     controls.className = 'pl-controls pl-bowling';
-    const preview = () => scene.setMarker({ ...bowlPick, extra: null, travelMs: 1000 });
+    const preview = () => scene.setMarker({ line: bowlPick.line, length: bowlPick.length, pitch: bowlPick.pitch, extra: null, travelMs: 1000 });
     preview();
 
-    const group = (label, options, labels, key) => {
+    const lit = {};
+    const light = () => {
+      for (const [key, row] of Object.entries(lit)) {
+        row.querySelectorAll('button').forEach((x) => x.classList.toggle('pl-picked', x.dataset.value === bowlPick[key]));
+      }
+    };
+    const group = (label, options, labels, key, onPick) => {
       const wrap = el('div', 'pl-seg');
       wrap.append(el('span', 'pl-label', label));
       const row = el('div', 'pl-seg-row');
       for (const opt of options) {
         const b = button('pl-btn pl-seg-btn', labels[opt], () => {
-          if (meterRunning) return;
+          if (meterRunning || done) return;
           bowlPick[key] = opt;
-          row.querySelectorAll('button').forEach((x) => x.classList.toggle('pl-picked', x === b));
-          preview();
+          onPick?.();
+          light();
         });
-        if (bowlPick[key] === opt) b.classList.add('pl-picked');
+        b.dataset.value = opt;
         row.append(b);
       }
+      lit[key] = row;
       wrap.append(row);
       return wrap;
     };
-    controls.append(group('Line', LINES, LINE_LABELS, 'line'), group('Length', LENGTHS, LENGTH_LABELS, 'length'));
+    const snap = () => {
+      bowlPick.pitch = null;
+      preview();
+    };
+    const bowler = playerById(state, currentInnings(state).bowlerId);
+    const variationLabels = VARIATION_LABELS[bowler?.bowlType === 'spin' ? 'spin' : 'pace'];
+    controls.append(
+      group('Line', LINES, LINE_LABELS, 'line', snap),
+      group('Length', LENGTHS, LENGTH_LABELS, 'length', snap),
+      group('Variation', VARIATIONS, variationLabels, 'variation'),
+    );
+    light();
+
+    // Dragging the ring places the ball exactly; the matching buttons light up.
+    scene.enableMarkerDrag?.((p) => {
+      if (meterRunning || done) return;
+      bowlPick.pitch = { x: p.x, z: p.z };
+      bowlPick.line = lineFromX(p.x);
+      bowlPick.length = lengthFromZ(p.z);
+      light();
+    });
 
     const meter = el('div', 'pl-meter');
     const needle = el('div', 'pl-needle');
@@ -434,6 +482,7 @@ export function mount(root, props, navigate) {
       if (done) return;
       if (!meterRunning) {
         meterRunning = true;
+        scene.enableMarkerDrag?.(null);
         meterStart = performance.now();
         bowlBtn.textContent = 'Stop!';
         frame(tick);
@@ -444,7 +493,10 @@ export function mount(root, props, navigate) {
       bowlBtn.disabled = true;
       controls.querySelectorAll('button').forEach((b) => (b.disabled = true));
       const accuracy = Math.max(0, 1 - Math.abs(pos - 0.5) * 2);
-      deliver({ ...bowlPick, accuracy: Math.round(accuracy * 100) / 100 });
+      const bowl = { line: bowlPick.line, length: bowlPick.length, accuracy: Math.round(accuracy * 100) / 100 };
+      if (bowlPick.pitch) bowl.pitch = bowlPick.pitch;
+      if (bowlPick.variation !== 'stock') bowl.variation = bowlPick.variation;
+      deliver(bowl);
     }
     function onKey(e) {
       // A focused button already gets Enter/Space as a click.
@@ -459,6 +511,7 @@ export function mount(root, props, navigate) {
 
   function deliver(bowl) {
     setKeyHandler(null);
+    scene.enableMarkerDrag?.(null);
     const delivery = previewDelivery(state, bowl);
     const bat = aiBat(state, bowl);
     const result = playBall(state, bowl, bat);
@@ -499,6 +552,7 @@ export function mount(root, props, navigate) {
     frames.clear();
     setKeyHandler(null);
     detachSwipe();
+    scene.enableMarkerDrag?.(null);
     scene.destroy();
     root.textContent = '';
   };

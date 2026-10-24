@@ -1,13 +1,15 @@
 // Call the toss, flip the coin, winner picks bat or bowl, then start the match.
-// props: { fixture, rng, overs, difficulty }
+// props: { fixture, rng, overs, difficulty, venueId, ball }
 
 import { el, teamBadge } from '../dom.js';
 import { createMatch } from '../../engine/match.js';
+import { getVenue } from '../../data/venues.js';
 
 const FLIP_MS = 1200;
 
 export function mount(root, props, navigate) {
-  const { fixture, rng, overs, difficulty } = props;
+  const { fixture, rng, overs, difficulty, venueId, ball } = props;
+  const venue = getVenue(venueId);
   if (!fixture || !rng) {
     navigate('teamSelect');
     return () => {};
@@ -54,6 +56,8 @@ export function mount(root, props, navigate) {
       overs,
       difficulty,
       battingFirst: first,
+      venueId: venue ? venue.id : undefined,
+      ball: ball || 'white',
       seed: rng.int(1, 2147483646),
     });
     navigate('play', { match, rng });
@@ -71,6 +75,7 @@ export function mount(root, props, navigate) {
     const body = [
       el('h2', { className: 'screen__title' }, 'The toss'),
       el('div', { className: 'versus' }, teamBadge(userTeam, 'lg'), el('span', { className: 'versus__v' }, 'v'), teamBadge(aiTeam, 'lg')),
+      venue ? el('p', { className: 'venue-line' }, `${venue.name}, ${venue.city}${ball === 'pink' ? ' · day-night' : ''}`) : null,
       coin(),
     ];
     const actions = [];
