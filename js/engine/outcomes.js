@@ -36,10 +36,40 @@ export function travelTimeMs(kph) {
   return Math.round(clamp(900 + ((150 - kph) * 500) / 74, 900, 1400));
 }
 
+// ---- Landing spot and variations (SPEC 13.3) ----
+// pitch.x: metres batter-relative, + = leg side, 0 = middle stump.
+// pitch.z: metres in front of the batter's stumps.
+export const VARIATIONS = ['stock', 'in', 'out', 'slower'];
+export const PITCH_LIMITS = { xMin: -1.0, xMax: 0.6, zMin: 0.5, zMax: 12 };
+export const WIDE_X = -0.9;
+const SLOWER_TRAVEL = 1.25;
+
+export function lengthFromZ(z) {
+  if (z < 2.5) return 'yorker';
+  if (z < 5) return 'full';
+  if (z < 8) return 'good';
+  return 'short';
+}
+
+export function lineFromX(x) {
+  if (x < -0.08) return 'off';
+  if (x > 0.08) return 'leg';
+  return 'middle';
+}
+
+// Swing or turn moves the line at the batter one step: in = toward leg, out = toward off.
+export function swungLine(line, variation) {
+  const step = variation === 'in' ? 1 : variation === 'out' ? -1 : 0;
+  return LINES[clamp(LINES.indexOf(line) + step, 0, LINES.length - 1)];
+}
+
 /**
  * Turn the bowler's intent into what actually happens: inaccurate balls drift
- * one step in line or length and may be wides or no-balls.
- * @returns {{line:string, length:string, kph:number, travelMs:number, extra:null|'wide'|'noball'}}
+ * (one step in line or length, or a continuous scatter of a dragged landing
+ * spot) and may be wides or no-balls. Swing/turn and the slower ball are
+ * applied last. Without pitch/variation the rng draws are exactly as in v1.0.
+ * @returns {{line:string, length:string, kph:number, travelMs:number, extra:null|'wide'|'noball',
+ *   pitch:null|{x:number, z:number}, variation:string, swingX:number}}
  */
 export function prepareDelivery(bowl, bowler, rng) {
   const accuracy = clamp(Number.isFinite(bowl.accuracy) ? bowl.accuracy : 0.7, 0, 1);
@@ -47,14 +77,25 @@ export function prepareDelivery(bowl, bowler, rng) {
   const wobble = (1 - accuracy) * (1.25 - skill * 0.5);
   let line = LINES.includes(bowl.line) ? bowl.line : 'off';
   let length = LENGTHS.includes(bowl.length) ? bowl.length : 'good';
+  let pitch = null;
 
-  if (rng.next() < wobble * 0.7) {
-    const i = LENGTHS.indexOf(length) + (rng.next() < 0.5 ? -1 : 1);
-    length = LENGTHS[clamp(i, 0, LENGTHS.length - 1)];
-  }
-  if (rng.next() < wobble * 0.5) {
-    const i = LINES.indexOf(line) + (rng.next() < 0.5 ? -1 : 1);
-    line = LINES[clamp(i, 0, LINES.length - 1)];
+  if (bowl.pitch && Number.isFinite(bowl.pitch.x) && Number.isFinite(bowl.pitch.z)) {
+    // A chosen landing spot scatters continuously, then is bucketed.
+    const { xMin, xMax, zMin, zMax } = PITCH_LIMITS;
+    const x = clamp(bowl.pitch.x, xMin, xMax) + rng.normal() * wobble * 0.35;
+    const z = clamp(clamp(bowl.pitch.z, zMin, zMax) + rng.normal() * wobble * 2.2, 0.2, 13);
+    pitch = { x: Math.round(x * 100) / 100, z: Math.round(z * 100) / 100 };
+    line = lineFromX(pitch.x);
+    length = lengthFromZ(pitch.z);
+  } else {
+    if (rng.next() < wobble * 0.7) {
+      const i = LENGTHS.indexOf(length) + (rng.next() < 0.5 ? -1 : 1);
+      length = LENGTHS[clamp(i, 0, LENGTHS.length - 1)];
+    }
+    if (rng.next() < wobble * 0.5) {
+      const i = LINES.indexOf(line) + (rng.next() < 0.5 ? -1 : 1);
+      line = LINES[clamp(i, 0, LINES.length - 1)];
+    }
   }
 
   let extra = null;
@@ -63,9 +104,22 @@ export function prepareDelivery(bowl, bowler, rng) {
   const noball = 0.005 + wobble * 0.04;
   if (roll < wide) extra = 'wide';
   else if (roll < wide + noball) extra = 'noball';
+  if (pitch && pitch.x < WIDE_X) extra = 'wide';
 
-  const kph = clamp(deliverySpeedKph(bowler) + rng.int(-3, 3), 70, 155);
-  return { line, length, kph, travelMs: travelTimeMs(kph), extra };
+  let kph = clamp(deliverySpeedKph(bowler) + rng.int(-3, 3), 70, 155);
+  let travelMs = travelTimeMs(kph);
+
+  const variation = VARIATIONS.includes(bowl.variation) ? bowl.variation : 'stock';
+  let swingX = 0;
+  if (variation === 'in' || variation === 'out') {
+    const amount = 0.25 + rng.next() * 0.15;
+    swingX = Math.round((variation === 'in' ? amount : -amount) * 100) / 100;
+    line = swungLine(line, variation);
+  } else if (variation === 'slower') {
+    kph = Math.round(kph * 0.8);
+    travelMs = Math.round(travelMs * SLOWER_TRAVEL);
+  }
+  return { line, length, kph, travelMs, extra, pitch, variation, swingX };
 }
 
 // Base outcome weights per shot and timing. Keys are runs, or 'out'.
@@ -169,6 +223,7 @@ export function resolveOutcome({ delivery, bat, batter, bowler, difficulty, user
   if (shot === 'leave') {
     let chance = LEAVE_OUT[delivery.line] * (delivery.length === 'short' ? 0.2 : 1) * exposure;
     if (aimedAtStumps(delivery.line, offsetX) && delivery.length !== 'short') chance = Math.max(chance, 0.3);
+    if (delivery.variation === 'in' && delivery.line === 'middle') chance *= 1.5;
     const out = rng.next() < chance;
     return { runs: 0, wicketKind: out ? rng.weighted(WICKET_KINDS.leave) : null, timing: null, shot };
   }
@@ -182,6 +237,15 @@ export function resolveOutcome({ delivery, bat, batter, bowler, difficulty, user
   const scoreMul = lenScore * lineScore * (1 + 0.5 * skill) * (1 + 0.12 * userEdge);
   let outMul = lenOut * lineOut * (1 - 0.6 * skill) * (1 - 0.2 * userEdge);
   if (timing === 'miss') outMul *= exposure;
+  const variation = delivery.variation ?? 'stock';
+  const edgy = timing === 'early' || timing === 'late';
+  // Outswing/turn away finds edges on a full or good length.
+  const outEdge = variation === 'out' && (delivery.length === 'good' || delivery.length === 'full');
+  if (outEdge) outMul *= edgy ? 2 : 1.35;
+  // Inswing/turn in attacks the stumps on a straight line.
+  const inStraight = variation === 'in' && line === 'middle';
+  if (inStraight) outMul *= 1.6;
+  if (variation === 'slower' && shot === 'loft') outMul *= 1.35;
 
   const weights = {};
   for (const [key, w] of Object.entries(row)) {
@@ -194,6 +258,8 @@ export function resolveOutcome({ delivery, bat, batter, bowler, difficulty, user
     let kinds = WICKET_KINDS[shot];
     // Missing with the stumps exposed: more likely to be bowled.
     if (timing === 'miss' && exposure > 1) kinds = { ...kinds, bowled: (kinds.bowled ?? 0) + 60 * (exposure - 1) };
+    if (outEdge) kinds = { ...kinds, caught: (kinds.caught ?? 0) + 40 };
+    if (inStraight) kinds = { ...kinds, bowled: (kinds.bowled ?? 0) + 30, lbw: (kinds.lbw ?? 0) + 30 };
     return { runs: 0, wicketKind: rng.weighted(kinds), timing, shot };
   }
 

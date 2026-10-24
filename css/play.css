@@ -45,6 +45,7 @@
 .pl-striker { font-weight: 700; }
 .pl-bowl { color: var(--pl-muted); }
 .pl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-venue { color: var(--pl-muted); font-size: 13px; padding: 2px 4px 0; }
 
 /* Match scene (js/ui/scene): an SVG that fills the stage. */
 .pl-pitch-wrap {
@@ -255,4 +256,9 @@
   .pl-shots { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
   .pl-shot { min-height: 48px; padding: 6px 2px; font-size: 15px; }
   .pl-shots .pl-hint { font-size: 13px; }
+  /* Bowling: label beside each row (Line, Length, Variation) to save height. */
+  .pl-bowling .pl-seg { display: grid; grid-template-columns: 4.6em minmax(0, 1fr); align-items: center; gap: 6px; }
+  .pl-bowling .pl-label { margin: 0; font-size: 13px; }
+  .pl-bowling .pl-seg-btn { min-height: 40px; padding: 4px 2px; font-size: 14px; }
+  .pl-bowling .pl-go { min-height: 48px; }
 }
