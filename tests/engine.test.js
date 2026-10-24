@@ -574,7 +574,7 @@ test('a scattered ball always pitches in front of the crease', () => {
   }
 });
 
-test('expectedArrival matches the engine at 100% accuracy: exact for a button ball, within the swing spread for a placed one', () => {
+test('expectedArrival matches the engine at 100% accuracy for every ball', () => {
   const TOP = { bowling: 100, bowlType: 'pace' };
   let wides = 0;
   for (const line of ['off', 'middle', 'leg']) for (const length of Object.keys(SPOT_Z)) for (const variation of VARIATIONS)
@@ -583,8 +583,7 @@ test('expectedArrival matches the engine at 100% accuracy: exact for a button ba
       const want = expectedArrival(bowl, bats);
       for (let i = 0; i < 20; i++) {
         const d = prepareDelivery(bowl, TOP, createRng(i * 31 + 5), { bats });
-        const tol = pitch && (variation === 'in' || variation === 'out') ? 0.086 : 0.011;
-        assert.ok(Math.abs(d.arrivalX - want.x) <= tol, `${line} ${length} ${variation} ${side} ${bats} ${JSON.stringify(pitch)}: ${d.arrivalX} vs ${want.x}`);
+        assert.ok(Math.abs(d.arrivalX - want.x) <= 0.011, `${line} ${length} ${variation} ${side} ${bats} ${JSON.stringify(pitch)}: ${d.arrivalX} vs ${want.x}`);
         assert.equal(want.releaseX, d.releaseX);
         if (want.wide) wides++;
       }
@@ -593,4 +592,12 @@ test('expectedArrival matches the engine at 100% accuracy: exact for a button ba
   assert.equal(expectedArrival({ line: 'middle', length: 'yorker' }, 'R').wide, false);
   assert.equal(expectedArrival({ pitch: { x: -0.9, z: 12 }, side: 'around' }, 'R').wide, true);
   assert.ok(Math.abs(expectedArrival({ pitch: { x: 0, z: 6.4 }, variation: 'in' }, 'R').x - expectedArrival({ pitch: { x: 0, z: 6.4 } }, 'R').x - EXPECTED_SWING_M) < 0.011);
+});
+
+test('swing is exactly the average at full accuracy and spreads to 0.25..0.40 as the meter is missed', () => {
+  const amounts = (accuracy) => Array.from({ length: 400 }, (_, i) => Math.abs(prepareDelivery({ line: 'off', length: 'good', variation: 'in', accuracy }, { bowling: 100 }, createRng(i + 1)).swingX));
+  for (const a of amounts(1)) assert.ok(Math.abs(a - 0.325) <= 0.006, `${a}`);
+  const loose = amounts(0);
+  assert.ok(Math.min(...loose) < 0.27 && Math.max(...loose) > 0.38);
+  for (const a of loose) assert.ok(a >= 0.25 && a <= 0.4);
 });

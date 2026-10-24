@@ -80,7 +80,8 @@ export function pitchForArrival(releaseX, arrivalX, z) {
 
 export const isWideAt = (x) => x < WIDE_X || x > LEG_WIDE_X;
 
-// Average of the 0.25..0.4 m swing/turn prepareDelivery rolls.
+// Swing/turn at the batter at full accuracy; it spreads to 0.25..0.40 m as
+// the meter is missed.
 export const EXPECTED_SWING_M = 0.325;
 
 /**
@@ -173,7 +174,9 @@ export function prepareDelivery(bowl, bowler, rng, batter = null) {
   const variation = VARIATIONS.includes(bowl.variation) ? bowl.variation : 'stock';
   let swingX = 0;
   if (variation === 'in' || variation === 'out') {
-    const amount = 0.25 + rng.next() * 0.15;
+    // Exactly the average at full accuracy, so the arrival marker is right;
+    // the 0.25..0.40 spread opens up as accuracy drops (same single draw).
+    const amount = EXPECTED_SWING_M + (rng.next() - 0.5) * 0.15 * (1 - accuracy);
     swingX = Math.round((variation === 'in' ? amount : -amount) * 100) / 100;
     if (!pitch) line = swungLine(line, variation);
   } else if (variation === 'slower') {
