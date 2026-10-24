@@ -135,6 +135,24 @@
 .pl-shot { min-height: 60px; font-size: 18px; }
 .pl-hint { grid-column: 1 / -1; margin: 0; color: var(--pl-muted); font-size: 14px; text-align: center; }
 
+/* Phase 3 batting: swipe zone over the lower half of the scene, move buttons
+   and the Loft toggle. play.js sets the zone's position and touch-action. */
+.pl-swipe {
+  background: linear-gradient(to top, rgba(255, 210, 63, 0.12), rgba(255, 210, 63, 0) 70%);
+  border-top: 1px dashed rgba(255, 255, 255, 0.28);
+  cursor: crosshair;
+  -webkit-tap-highlight-color: transparent;
+}
+.pl-move-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1.6fr 1fr;
+  gap: 8px;
+}
+.pl-move-left, .pl-move-right { min-height: 48px; font-size: 22px; line-height: 1; }
+.pl-loft { min-height: 48px; font-size: 16px; }
+.pl-loft[aria-pressed='true'], .pl-loft.pl-picked { background: var(--pl-accent); color: #111; opacity: 1; }
+
 .pl-label { display: block; margin: 0 0 4px; color: var(--pl-muted); font-size: 14px; }
 .pl-seg-row { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
 .pl-seg-btn { min-height: 44px; font-size: 15px; padding: 6px 4px; }
