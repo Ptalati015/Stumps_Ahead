@@ -213,9 +213,6 @@ button { font: inherit; color: inherit; }
   -webkit-user-select: none;
 }
 .seg--on { border-color: var(--accent); background: var(--accent); color: var(--accent-text); }
-.segmented--grid .segmented__opts { display: grid; grid-template-columns: 1fr 1fr; }
-.seg__main, .seg__sub { display: block; }
-.seg__sub { font-size: .75rem; opacity: .75; font-weight: 400; }
 .seg .ball-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; border: 1px solid rgba(0, 0, 0, .35); }
 .ball-dot--red { background: #b3202a; }
 .ball-dot--white { background: #f4f2ea; }
@@ -223,6 +220,61 @@ button { font: inherit; color: inherit; }
 .hint { color: var(--muted); font-size: .85rem; margin: -8px 0 8px; }
 .venue-line { text-align: center; color: var(--muted); font-size: .9rem; margin: 4px 0 10px; }
 .version { color: var(--muted); opacity: .6; font-size: .72rem; text-align: center; margin: 4px 0 12px; }
+
+/* ---------- Venue (SPEC 14.1) ---------- */
+
+.venue-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0 4px; }
+@media (min-width: 900px) { .venue-grid { grid-template-columns: repeat(4, 1fr); gap: 14px; } }
+.vcard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: var(--tap);
+  min-width: 0;
+  padding: 0 0 10px;
+  overflow: hidden;
+  text-align: left;
+  color: var(--text);
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  opacity: .78;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform .15s ease, opacity .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.vcard--on {
+  opacity: 1;
+  border-color: var(--accent);
+  transform: scale(1.035);
+  box-shadow: 0 0 0 3px rgba(255, 210, 63, .25), 0 0 18px rgba(255, 210, 63, .35);
+  z-index: 1;
+}
+.vcard:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.vart { display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; }
+.vcard__tag {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.vcard__tag--home { background: var(--team-primary); color: #fff; box-shadow: inset 0 -2px 0 var(--team-secondary); }
+.vcard__tag--away { background: #14231b; color: var(--muted); box-shadow: inset 0 0 0 1px var(--line); }
+.vcard__name { font-weight: 700; font-size: .95rem; line-height: 1.2; margin: 8px 10px 0; overflow-wrap: anywhere; }
+.vcard__city { color: var(--muted); font-size: .8rem; margin: 2px 10px 0; }
+.vcard__tagline { color: var(--text); opacity: .85; font-size: .75rem; line-height: 1.3; margin: 6px 10px 0; }
+/* Long ground names: a compact Back so "Play at ..." keeps to two lines. */
+.screen--venue .actionbar .btn--ghost { flex: 0 0 auto; padding-inline: 18px; }
+.screen--venue .actionbar .btn--primary { line-height: 1.2; }
+@media (prefers-reduced-motion: reduce) { .vcard { transition: none; } .vcard--on { transform: none; } }
 
 /* ---------- Toss ---------- */
 
