@@ -6,6 +6,7 @@
 import { svg, set, pts, lerp, clamp01, easeOut, easeInOut } from './svg.js';
 import { createPerson, createBatter3D, yawLocal } from './figures.js';
 import { getVenue } from '../../data/venues.js';
+import { PITCH_LIMITS } from '../../engine/outcomes.js';
 
 // ---- Pitch cam projection --------------------------------------------------
 // World: x across the pitch (metres, + is the leg side of a right-hander),
@@ -60,6 +61,8 @@ const RUN_START = { x: -0.8, z: 25.6 };
 const BOUND_AT = { x: -0.55, z: 21.4 };
 const DELIVERY_STRIDE = { x: -0.45, z: 19.9 };
 const FOLLOW_END = { x: -1.7, z: 16.6 };
+// Around the wicket releases at about 0.85 m against 0.25 m over (SPEC 15.2).
+const AROUND_WIDEN = 0.6;
 
 // ---- Field cam ---------------------------------------------------------
 // Top-down and lined up with the pitch cam: with the bowling camera the
@@ -156,9 +159,16 @@ function rgba(hex, a) {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
 
-/** x position of a delivery at the batting crease. off = -1 for a right-hander, +1 for a left-hander. */
+/**
+ * x position of a delivery at the batting crease. off = -1 for a right-hander, +1 for a left-hander.
+ * A wide is drawn where the engine says it arrived (delivery.arrivalX, batter-relative,
+ * SPEC 15.1); the fixed spots are only a fallback for older deliveries.
+ */
 function lineX(delivery, off) {
-  if (delivery.extra === 'wide') return delivery.line === 'leg' ? -0.85 * off : 0.95 * off;
+  if (delivery.extra === 'wide') {
+    if (Number.isFinite(delivery.arrivalX)) return delivery.arrivalX * -off;
+    return delivery.line === 'leg' ? -0.85 * off : 0.95 * off;
+  }
   return -(LINE_AT_CREASE[delivery.line] ?? 0) * off;
 }
 
@@ -262,10 +272,14 @@ export function createScene(host) {
   const marker = svg('ellipse', { class: 'sc-marker', fill: 'rgba(255,210,63,0.28)', stroke: '#ffd23f', 'stroke-width': 1.4 }, markerLayer);
   const guardMark = svg('line', { stroke: '#ffd23f', 'stroke-linecap': 'round' }, markerLayer);
   const actorLayer = svg('g', {}, pitchCam);
-  const aimLayer = svg('g', { class: 'sc-aim' }, pitchCam);
-  const aimPath = svg('polyline', { fill: 'none', stroke: '#ffd23f', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, aimLayer);
-  const aimHead = svg('polygon', { fill: '#ffd23f' }, aimLayer);
-  aimLayer.setAttribute('visibility', 'hidden');
+  // Where the set-up ball will reach the batter (SPEC 15.1): a post and a
+  // diamond on the popping crease, above the actors so the batter never hides
+  // it. Neutral, or red when that point is past a wide line.
+  const arrivalG = svg('g', { class: 'sc-arrival', visibility: 'hidden', 'pointer-events': 'none' }, pitchCam);
+  const arrivalHalo = svg('line', { 'stroke-linecap': 'round' }, arrivalG);
+  const arrivalPost = svg('line', { 'stroke-linecap': 'round' }, arrivalG);
+  const arrivalTip = svg('polygon', {}, arrivalG);
+  let arrival = null;
   // Night: the edges of the frame fall away into the dark.
   const nightShade = svg('rect', { x: -2000, y: -2000, width: 4400, height: 4400, fill: 'url(#sc-vignette)', 'pointer-events': 'none', visibility: 'hidden' }, pitchCam);
 
@@ -298,10 +312,17 @@ export function createScene(host) {
   let bowler = null;
   let keeper = null;
   let umpire = null;
+  let nonStriker = null;
   let fielders = [];
   let runners = [];
   let keeperZ = -11;
-  let bowlerPos = { ...RUN_START };
+  // Over the wicket: the bowler runs in on world -x (the off side of a
+  // right-hander); around mirrors the run-up, stride and follow-through to +x,
+  // a little wider (AROUND_WIDEN) to match the wider release point. The umpire
+  // and non-striker stand on the other side (SPEC 15.2).
+  let sideSign = 1;
+  const bsp = (p) => (sideSign > 0 ? { x: p.x, z: p.z } : { x: -p.x + AROUND_WIDEN, z: p.z });
+  let bowlerPos = bsp(RUN_START);
   let lastBallOpts = null;
   let actors = [];
   let strikerStumps = null;
@@ -434,7 +455,6 @@ export function createScene(host) {
     setCam('pitch');
     hideBall();
     hideFieldBall();
-    showAim(null);
     marker.setAttribute('visibility', 'hidden');
     fieldStumps.forEach((st) => st.setAttribute('fill', '#f5f0e1'));
     flight = null;
@@ -475,6 +495,7 @@ export function createScene(host) {
     batPose = { ...STANCE };
     drawBatter();
     drawGuardMark();
+    drawArrival();
     const idleStart = performance.now();
     track('batter', (now) => {
       // A small tap of the bat while waiting.
@@ -484,10 +505,11 @@ export function createScene(host) {
       return true;
     });
 
-    person(batKit, NON_STRIKER.x * -off, NON_STRIKER.z, { ...facing(batting), bat: true }, { armR: 8, armL: -10 });
-    umpire = person({ shirt: '#f4f4ee', trousers: '#262626', cap: '#f4f4ee' }, UMPIRE.x, UMPIRE.z, { ...facing(batting), hat: true }, {});
-    bowler = person(bowlKit, RUN_START.x, RUN_START.z, facing(batting), {});
-    bowlerPos = { ...RUN_START };
+    if (opts.side) sideSign = opts.side === 'around' ? -1 : 1;
+    nonStriker = person(batKit, NON_STRIKER.x * sideSign, NON_STRIKER.z, { ...facing(batting), bat: true }, { armR: 8, armL: -10 });
+    umpire = person({ shirt: '#f4f4ee', trousers: '#262626', cap: '#f4f4ee' }, UMPIRE.x * sideSign, UMPIRE.z, { ...facing(batting), hat: true }, {});
+    bowlerPos = bsp(RUN_START);
+    bowler = person(bowlKit, bowlerPos.x, bowlerPos.z, facing(batting), {});
     placeBowler();
     bowler.holdBall(true);
     sortActors();
@@ -505,6 +527,22 @@ export function createScene(host) {
     placePerson(bowler, bowlerPos.x, bowlerPos.z);
   }
 
+  /** 'over' or 'around' the wicket: moves the bowler to that side's mark, and the umpire and non-striker across. */
+  function setBowlingSide(side) {
+    const next = side === 'around' ? -1 : 1;
+    if (lastBallOpts) lastBallOpts = { ...lastBallOpts, side: next < 0 ? 'around' : 'over' };
+    if (next === sideSign || !bowler) {
+      sideSign = next;
+      return;
+    }
+    sideSign = next;
+    tracks.delete('bowler');
+    bowlerPos = bsp(RUN_START);
+    placeBowler();
+    if (umpire) placePerson(umpire, UMPIRE.x * sideSign, UMPIRE.z);
+    if (nonStriker) placePerson(nonStriker, NON_STRIKER.x * sideSign, NON_STRIKER.z);
+  }
+
   // The bowler's type decides swing (pace) or turn (spin) when the delivery doesn't say.
   const pathFor = (delivery) => deliveryPath({ spinner: !!lastBallOpts?.spinner, ...delivery }, off);
 
@@ -513,6 +551,32 @@ export function createScene(host) {
     const [sx, sy, s] = project(path.bounce.x, 0, path.bounce.z);
     set(marker, { cx: sx, cy: sy, rx: 0.24 * s, ry: 0.09 * s, visibility: 'visible' });
   }
+  /** {x, wide}: x in batter-relative metres (+ toward leg) at the crease; null hides it. */
+  function setArrivalMarker(spot) {
+    arrival = spot && Number.isFinite(spot.x) ? { x: spot.x, wide: !!spot.wide } : null;
+    drawArrival();
+  }
+  function drawArrival() {
+    if (!arrival) {
+      arrivalG.setAttribute('visibility', 'hidden');
+      return;
+    }
+    const wx = arrival.x * -off;
+    const [gx, gy, sc] = project(wx, 0, CREASE_Z);
+    const [, ty] = project(wx, STUMP_H, CREASE_Z);
+    // Light blue, not white, so it stands off the pads and crease lines. The
+    // floors keep it readable at the far end on a phone (~0.66 px per unit).
+    const color = arrival.wide ? '#ff4d4d' : '#9fe0ff';
+    const edge = arrival.wide ? '#5c0a12' : '#0d2f45';
+    const w = Math.max(4.5, 0.1 * sc);
+    const lw = Math.max(1.4, 0.025 * sc);
+    const top = Math.min(ty, gy - 3.2 * w);
+    set(arrivalHalo, { x1: gx, y1: gy, x2: gx, y2: top, stroke: edge, 'stroke-width': lw + 1.2, 'stroke-opacity': 0.55 });
+    set(arrivalPost, { x1: gx, y1: gy, x2: gx, y2: top, stroke: color, 'stroke-width': lw, 'stroke-dasharray': `${Math.max(2.4, 0.06 * sc).toFixed(1)} ${Math.max(1.8, 0.05 * sc).toFixed(1)}` });
+    set(arrivalTip, { points: pts([[gx, gy - w * 0.7], [gx + w, gy], [gx, gy + w * 0.7], [gx - w, gy]]), fill: color, stroke: edge, 'stroke-width': 0.9 });
+    arrivalG.setAttribute('visibility', 'visible');
+  }
+
   function hideMarker() {
     marker.setAttribute('visibility', 'hidden');
   }
@@ -526,15 +590,15 @@ export function createScene(host) {
       let pose;
       if (u < 0.72) {
         const v = u / 0.72;
-        pos = { x: lerp(RUN_START.x, BOUND_AT.x, v), z: lerp(RUN_START.z, BOUND_AT.z, v) };
+        pos = bsp({ x: lerp(RUN_START.x, BOUND_AT.x, v), z: lerp(RUN_START.z, BOUND_AT.z, v) });
         pose = { run: (now - start) / 1000 * Math.PI * 2 * 2.6, runAmt: Math.min(1, v * 4), lean: 0.3 };
       } else if (u < 0.86) {
         const v = (u - 0.72) / 0.14;
-        pos = { x: lerp(BOUND_AT.x, DELIVERY_STRIDE.x, v * 0.5), z: lerp(BOUND_AT.z, DELIVERY_STRIDE.z, v * 0.5) };
+        pos = bsp({ x: lerp(BOUND_AT.x, DELIVERY_STRIDE.x, v * 0.5), z: lerp(BOUND_AT.z, DELIVERY_STRIDE.z, v * 0.5) });
         pose = { bound: Math.sin(Math.PI * v) * 0.35, armL: lerp(-12, 165, v), armR: lerp(12, 35, v), lean: 0.1 };
       } else {
         const v = (u - 0.86) / 0.14;
-        pos = { x: lerp(BOUND_AT.x, DELIVERY_STRIDE.x, 0.5 + v * 0.5), z: lerp(BOUND_AT.z, DELIVERY_STRIDE.z, 0.5 + v * 0.5) };
+        pos = bsp({ x: lerp(BOUND_AT.x, DELIVERY_STRIDE.x, 0.5 + v * 0.5), z: lerp(BOUND_AT.z, DELIVERY_STRIDE.z, 0.5 + v * 0.5) });
         pose = { armL: lerp(165, 60, v), armR: lerp(35, -195, easeInOut(v)), spread: 0.12 * v, lean: 0.2 * v };
       }
       bowlerPos = pos;
@@ -551,7 +615,7 @@ export function createScene(host) {
     track('bowler', (now) => {
       const u = clamp01((now - start) / ms);
       const e = easeOut(u);
-      bowlerPos = { x: lerp(DELIVERY_STRIDE.x, FOLLOW_END.x, e), z: lerp(DELIVERY_STRIDE.z, FOLLOW_END.z, e) };
+      bowlerPos = bsp({ x: lerp(DELIVERY_STRIDE.x, FOLLOW_END.x, e), z: lerp(DELIVERY_STRIDE.z, FOLLOW_END.z, e) });
       placeBowler();
       bowler.pose({
         armR: lerp(-195, -330, easeOut(clamp01(u * 2.5))),
@@ -576,6 +640,7 @@ export function createScene(host) {
   function release(delivery, { pre = null, swing = null } = {}) {
     enableMarkerDrag(null);
     hideMarker();
+    setArrivalMarker(null);
     followThrough();
     const path = pathFor(delivery);
     const start = performance.now();
@@ -653,7 +718,6 @@ export function createScene(host) {
   function swingBat(shot, opts = {}) {
     if (!batter) return;
     if (flight) flight.swung = true;
-    showAim(null);
     const kind = opts.aerial && shot !== 'defend' && shot !== 'leave' ? 'loft' : SWINGS[shot] ? shot : 'defend';
     animateBatter(aimSwing(SWINGS[kind], kind, opts.aimDeg));
   }
@@ -1025,41 +1089,6 @@ export function createScene(host) {
     });
   }
 
-  /**
-   * Live aim arrow from the bat while the player swipes: dashed along the
-   * ground for a ground shot, arched for an aerial one. null hides it.
-   */
-  function showAim(aim) {
-    if (!aim || aim.aimDeg == null || !batter) {
-      aimLayer.setAttribute('visibility', 'hidden');
-      return;
-    }
-    const ang = (aim.aimDeg * -off * Math.PI) / 180;
-    const from = { x: batX + off * 0.38, z: CREASE_Z };
-    const len = aim.aerial ? 8 : 6;
-    const points = [];
-    for (let i = 0; i <= 14; i++) {
-      const u = i / 14;
-      const y = aim.aerial ? 0.25 + Math.sin(Math.PI * u * 0.85) * 2.4 : 0.06;
-      points.push(project(from.x + Math.sin(ang) * len * u, y, from.z + Math.cos(ang) * len * u));
-    }
-    const near = points[0][2];
-    set(aimPath, {
-      points: pts(points),
-      'stroke-width': Math.max(1.4, 0.07 * near).toFixed(2),
-      'stroke-dasharray': aim.aerial ? 'none' : `${(0.25 * near).toFixed(1)} ${(0.18 * near).toFixed(1)}`,
-    });
-    // Arrowhead in screen space along the last segment.
-    const [ex, ey] = points[points.length - 1];
-    const [px, py] = points[points.length - 3];
-    const d = Math.hypot(ex - px, ey - py) || 1;
-    const ux = (ex - px) / d;
-    const uy = (ey - py) / d;
-    const size = 6;
-    set(aimHead, { points: pts([[ex + ux * size, ey + uy * size], [ex - uy * size * 0.6, ey + ux * size * 0.6], [ex + uy * size * 0.6, ey - ux * size * 0.6]]) });
-    aimLayer.setAttribute('visibility', 'visible');
-  }
-
   function rebuildBackground() {
     bgLayer.replaceChildren();
     drawPitchCamBackground(bgLayer);
@@ -1082,10 +1111,10 @@ export function createScene(host) {
     drawFieldCamBackground(fieldBg);
   }
 
-  // Drag limits, batter-relative metres: across from 1.0 m outside off to
-  // 0.6 m outside leg (0 = middle stump), along 0.5 m to 12 m from the stumps.
-  const DRAG_X = [-1.0, 0.6];
-  const DRAG_Z = [0.5, 12];
+  // Drag limits, batter-relative metres, straight from the engine's
+  // PITCH_LIMITS so the ring can only sit where a ball can actually pitch.
+  const DRAG_X = [PITCH_LIMITS.xMin, PITCH_LIMITS.xMax];
+  const DRAG_Z = [PITCH_LIMITS.zMin, PITCH_LIMITS.zMax];
   let markerDrag = null;
   let dragId = null;
   let dragSpot = null;
@@ -1153,8 +1182,8 @@ export function createScene(host) {
   }
 
   return {
-    newBall, setMarker, hideMarker, runUp, release, swing: swingBat, outcome, destroy,
-    setCamera, setBatter, showAim, setConditions, enableMarkerDrag,
+    newBall, setMarker, hideMarker, setArrivalMarker, runUp, release, swing: swingBat, outcome, destroy,
+    setCamera, setBatter, setBowlingSide, setConditions, enableMarkerDrag,
   };
 
   // ---- Static drawing ----
