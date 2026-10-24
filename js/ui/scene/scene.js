@@ -52,6 +52,8 @@ const RELEASE = { x: -0.25, y: 2.2, z: 19.4 };
 const BOUNCE_Z = { yorker: 1.7, full: 3.6, good: 6.6, short: 10.2 };
 const ARRIVE_H = { yorker: 0.12, full: 0.45, good: 0.85, short: 1.35 };
 const LINE_AT_CREASE = { off: -0.17, middle: 0, leg: 0.15 };
+// Half the pitch's width (3.05 m).
+const PITCH_HALF_W = 1.52;
 const UMPIRE = { x: 0.8, z: 22 };
 const NON_STRIKER = { x: 1.35, z: 19.4 };
 const RUN_START = { x: -0.8, z: 25.6 };
@@ -175,9 +177,10 @@ function arriveHeight(zb) {
  * Ball position over time (seconds since release) for a delivery.
  * delivery.pitch {x, z} (batter-relative, + toward leg) places the bounce;
  * without it the Line/Length presets do. delivery.swingX (batter-relative
- * metres between release and arrival) bends the path: in the air for pace
- * (swing), after the bounce for spin (turn). Slower balls just have a longer
- * travelMs.
+ * metres between release and arrival) moves the ball: in the air for pace
+ * (swing, a late curve onto the landing spot, then straight), after the
+ * bounce for spin (turn). Slower balls just have a longer travelMs.
+ * The ball stays on the pitch unless the engine called a wide.
  */
 export function deliveryPath(delivery, off = -1) {
   const T = delivery.travelMs / 1000;
@@ -190,6 +193,8 @@ export function deliveryPath(delivery, off = -1) {
   const vUp = (hA + 4.9 * tA * tA) / tA;
   const sw = (Number(delivery.swingX) || 0) * -off;
   const X0 = RELEASE.x;
+  const edge = delivery.extra === 'wide' ? Infinity : PITCH_HALF_W;
+  const keepOn = (x) => Math.max(-edge, Math.min(edge, x));
   let xp;
   let xA;
   if (pitch) {
@@ -201,24 +206,28 @@ export function deliveryPath(delivery, off = -1) {
     xA = lineX(delivery, off);
     xp = lerp(X0, xA - sw, tb / T);
   }
-  // x(t) = X0 + b t + c g(t), through the bounce and arrival points.
+  xA = keepOn(xA);
+  // Pace swing: a constant sideways pull toward sw, so the ball starts a
+  // little the other way and curves late onto the spot. k sets how hard it
+  // bends; the most it strays from the straight release-to-spot line is
+  // k * |sw| / 4, kept within |sw|. Where it can, the curve leaves the bounce
+  // heading the way the ball goes on to the batter.
   const turn = delivery.bowlType === 'spin' || (delivery.bowlType == null && !!delivery.spinner);
-  const g = turn ? (t) => Math.max(0, (t - tb) / tA) : (t) => (t / T) * (t / T);
-  const [gb, gA] = [g(tb), g(T)];
-  const det = tb * gA - T * gb;
-  const b = Math.abs(det) < 1e-9 ? (xA - X0) / T : ((xp - X0) * gA - (xA - X0) * gb) / det;
-  const c = Math.abs(det) < 1e-9 ? 0 : (tb * (xA - X0) - T * (xp - X0)) / det;
+  const k = turn ? 0 : Math.min(4, tb / Math.max(tA, 1e-6));
   const path = (t) => {
     const z = RELEASE.z - vz * t;
+    let x;
     let y;
     if (t < tb) {
       const u = t / tb;
+      x = X0 + (xp - X0) * u + k * sw * (u * u - u);
       y = RELEASE.y * (1 - u) * (1 + 0.35 * u);
     } else {
       const s = t - tb;
+      x = xp + ((xA - xp) * s) / tA;
       y = Math.max(0.03, vUp * s - 4.9 * s * s);
     }
-    return { x: X0 + b * t + c * g(t), y, z };
+    return { x: keepOn(x), y, z };
   };
   path.vz = vz;
   path.T = T;
