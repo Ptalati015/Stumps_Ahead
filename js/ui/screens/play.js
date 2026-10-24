@@ -91,11 +91,9 @@ export function mount(root, props, navigate) {
   const controls = el('div', 'pl-controls');
   const venueLine = el('div', 'pl-venue');
   venueLine.hidden = true;
-  // Score on the left, pause on the right (SPEC 16.3). Laid out through
-  // CSSOM so it holds under the strict CSP; Joel styles .pl-pause.
+  // Score on the left, pause on the right (SPEC 16.3); Joel styles
+  // .pl-score, .pl-score-main and .pl-pause.
   const scoreMain = el('div', 'pl-score-main');
-  Object.assign(scoreSlot.style, { display: 'flex', alignItems: 'flex-start', gap: '8px' });
-  Object.assign(scoreMain.style, { flex: '1 1 auto', minWidth: '0' });
   scoreMain.append(miniScore, venueLine);
   const pauseBtn = button('pl-btn pl-pause', '\u23F8', () => requestPause());
   pauseBtn.setAttribute('aria-label', 'Pause');
@@ -449,10 +447,9 @@ export function mount(root, props, navigate) {
       b.disabled = true;
       return b;
     });
-    // Pad on the left, shots on the right (two columns, Loft across the bottom).
+    // Pad on the left, shots on the right (two columns, Loft across the
+    // bottom); Joel styles .pl-bat-row and .pl-shot-col.
     const shotCol = el('div', 'pl-shot-col');
-    Object.assign(shotCol.style, { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' });
-    buttons[buttons.length - 1].style.gridColumn = '1 / -1';
     shotCol.append(...buttons);
     const batRow = el('div', 'pl-bat-row');
     batRow.append(pad, shotCol);
