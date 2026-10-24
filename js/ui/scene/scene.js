@@ -5,6 +5,7 @@
 // Math.random, never the match rng.
 import { svg, set, pts, lerp, clamp01, easeOut, easeInOut } from './svg.js';
 import { createPerson, createBatter3D, yawLocal } from './figures.js';
+import { getVenue } from '../../data/venues.js';
 
 // ---- Pitch cam projection --------------------------------------------------
 // World: x across the pitch (metres, + is the leg side of a right-hander),
@@ -27,6 +28,18 @@ function project(x, y, z) {
   return [CX - cam.dir * x * s, cam.horizon + (cam.h - y) * s, s];
 }
 const camDepth = (z) => cam.dir * (z - cam.z);
+
+// ---- Venue and ball (SPEC 13.4, 13.5) ---------------------------------------
+// Purely visual. setConditions picks the look; the background drawing and the
+// shared gradients read it. Pink means a day-night match under floodlights.
+const BALL_COLORS = {
+  red: { light: '#ff8a80', mid: '#c1121f', dark: '#7a0c14', rim: '#5a0a10' },
+  white: { light: '#ffffff', mid: '#f1eee6', dark: '#b8b2a3', rim: '#8a8577' },
+  pink: { light: '#ffc2de', mid: '#ff4f9a', dark: '#a8205b', rim: '#6e1238' },
+};
+const DEFAULT_GROUND = { sky: '#9fcbe8', stands: ['#3b4a63', '#5b6b85', '#e9ecef'] };
+let look = { night: false, ball: 'red', ...DEFAULT_GROUND };
+let defStops = null;
 
 const STUMP_X = [-0.114, 0, 0.114];
 const STUMP_H = 0.71;
@@ -136,22 +149,65 @@ function shade(hex, f) {
   return `rgb(${r},${g},${b})`;
 }
 
+function rgba(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
 /** x position of a delivery at the batting crease. off = -1 for a right-hander, +1 for a left-hander. */
 function lineX(delivery, off) {
   if (delivery.extra === 'wide') return delivery.line === 'leg' ? -0.85 * off : 0.95 * off;
   return -(LINE_AT_CREASE[delivery.line] ?? 0) * off;
 }
 
-/** Ball position over time (seconds since release) for a delivery. */
-function deliveryPath(delivery, off = -1) {
+// Arrival height at the batter for a bounce point z, between the presets.
+function arriveHeight(zb) {
+  const keys = ['yorker', 'full', 'good', 'short'];
+  if (zb <= BOUNCE_Z.yorker) return ARRIVE_H.yorker;
+  for (let i = 1; i < keys.length; i++) {
+    const [a, b] = [keys[i - 1], keys[i]];
+    if (zb <= BOUNCE_Z[b]) return lerp(ARRIVE_H[a], ARRIVE_H[b], (zb - BOUNCE_Z[a]) / (BOUNCE_Z[b] - BOUNCE_Z[a]));
+  }
+  return ARRIVE_H.short;
+}
+
+/**
+ * Ball position over time (seconds since release) for a delivery.
+ * delivery.pitch {x, z} (batter-relative, + toward leg) places the bounce;
+ * without it the Line/Length presets do. delivery.swingX (batter-relative
+ * metres between release and arrival) bends the path: in the air for pace
+ * (swing), after the bounce for spin (turn). Slower balls just have a longer
+ * travelMs.
+ */
+export function deliveryPath(delivery, off = -1) {
   const T = delivery.travelMs / 1000;
-  const zb = BOUNCE_Z[delivery.length] ?? BOUNCE_Z.good;
-  const hA = ARRIVE_H[delivery.length] ?? ARRIVE_H.good;
-  const xA = lineX(delivery, off);
+  const pitch = delivery.pitch && Number.isFinite(delivery.pitch.x) && Number.isFinite(delivery.pitch.z) ? delivery.pitch : null;
+  const zb = pitch ? pitch.z : BOUNCE_Z[delivery.length] ?? BOUNCE_Z.good;
+  const hA = pitch ? arriveHeight(zb) : ARRIVE_H[delivery.length] ?? ARRIVE_H.good;
   const vz = (RELEASE.z - CREASE_Z) / T;
   const tb = (RELEASE.z - zb) / vz;
   const tA = T - tb;
   const vUp = (hA + 4.9 * tA * tA) / tA;
+  const sw = (Number(delivery.swingX) || 0) * -off;
+  const X0 = RELEASE.x;
+  let xp;
+  let xA;
+  if (pitch) {
+    // Straight on through the landing spot, then the movement on top.
+    xp = pitch.x * -off;
+    xA = X0 + ((xp - X0) * T) / tb + sw;
+  } else {
+    // The preset line is where the ball ends up after any movement.
+    xA = lineX(delivery, off);
+    xp = lerp(X0, xA - sw, tb / T);
+  }
+  // x(t) = X0 + b t + c g(t), through the bounce and arrival points.
+  const turn = delivery.bowlType === 'spin' || (delivery.bowlType == null && !!delivery.spinner);
+  const g = turn ? (t) => Math.max(0, (t - tb) / tA) : (t) => (t / T) * (t / T);
+  const [gb, gA] = [g(tb), g(T)];
+  const det = tb * gA - T * gb;
+  const b = Math.abs(det) < 1e-9 ? (xA - X0) / T : ((xp - X0) * gA - (xA - X0) * gb) / det;
+  const c = Math.abs(det) < 1e-9 ? 0 : (tb * (xA - X0) - T * (xp - X0)) / det;
   const path = (t) => {
     const z = RELEASE.z - vz * t;
     let y;
@@ -162,11 +218,11 @@ function deliveryPath(delivery, off = -1) {
       const s = t - tb;
       y = Math.max(0.03, vUp * s - 4.9 * s * s);
     }
-    return { x: lerp(RELEASE.x, xA, t / T), y, z };
+    return { x: X0 + b * t + c * g(t), y, z };
   };
   path.vz = vz;
   path.T = T;
-  path.bounce = { x: lerp(RELEASE.x, xA, tb / T), z: zb };
+  path.bounce = { x: xp, z: zb };
   return path;
 }
 
@@ -177,6 +233,7 @@ function deliveryPath(delivery, off = -1) {
 export function createScene(host) {
   cam = CAMS.bowling;
   fieldFlip = 1;
+  look = { night: false, ball: 'red', ...DEFAULT_GROUND };
   const root = svg('svg', { class: 'sc', viewBox: '100 8 200 252', preserveAspectRatio: 'xMidYMid meet', 'aria-hidden': 'true' });
   host.prepend(root);
   buildDefs(root);
@@ -194,6 +251,8 @@ export function createScene(host) {
   const aimPath = svg('polyline', { fill: 'none', stroke: '#ffd23f', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, aimLayer);
   const aimHead = svg('polygon', { fill: '#ffd23f' }, aimLayer);
   aimLayer.setAttribute('visibility', 'hidden');
+  // Night: the edges of the frame fall away into the dark.
+  const nightShade = svg('rect', { x: -2000, y: -2000, width: 4400, height: 4400, fill: 'url(#sc-vignette)', 'pointer-events': 'none', visibility: 'hidden' }, pitchCam);
 
   const ballG = svg('g', {}, actorLayer);
   const ballShadow = svg('ellipse', { fill: 'rgba(0,0,0,0.35)' }, ballG);
@@ -202,7 +261,8 @@ export function createScene(host) {
 
   // ---- Field cam ----
   const fieldCam = svg('g', { class: 'sc-cam sc-off' }, root);
-  drawFieldCamBackground(fieldCam);
+  const fieldBg = svg('g', {}, fieldCam);
+  drawFieldCamBackground(fieldBg);
   const fieldStumps = [STRIKER_END, BOWLER_END].map(() => svg('rect', { width: 4, height: 2, fill: '#f5f0e1' }, fieldCam));
   const placeFieldStumps = () => [STRIKER_END, BOWLER_END].forEach((Y, i) => {
     const [x, y] = fpos(0, Y);
@@ -430,8 +490,11 @@ export function createScene(host) {
     placePerson(bowler, bowlerPos.x, bowlerPos.z);
   }
 
+  // The bowler's type decides swing (pace) or turn (spin) when the delivery doesn't say.
+  const pathFor = (delivery) => deliveryPath({ spinner: !!lastBallOpts?.spinner, ...delivery }, off);
+
   function setMarker(delivery) {
-    const path = deliveryPath(delivery, off);
+    const path = pathFor(delivery);
     const [sx, sy, s] = project(path.bounce.x, 0, path.bounce.z);
     set(marker, { cx: sx, cy: sy, rx: 0.24 * s, ry: 0.09 * s, visibility: 'visible' });
   }
@@ -496,9 +559,10 @@ export function createScene(host) {
    * shot at that time.
    */
   function release(delivery, { pre = null, swing = null } = {}) {
+    enableMarkerDrag(null);
     hideMarker();
     followThrough();
-    const path = deliveryPath(delivery, off);
+    const path = pathFor(delivery);
     const start = performance.now();
     const arriveAt = start + delivery.travelMs;
     let target = null;
@@ -882,6 +946,7 @@ export function createScene(host) {
   }
 
   function destroy() {
+    enableMarkerDrag(null);
     alive = false;
     cancelAnimationFrame(raf);
     tracks.clear();
@@ -986,15 +1051,90 @@ export function createScene(host) {
   }
   rebuildBackground();
 
-  // ---- Phase 4 API (SPEC 13.7). Stubs for now: they accept the new
-  // arguments so play.js can be wired against them. ----
-  let conditions = { venue: null, ball: 'white' };
-  function setConditions({ venue = null, ball = 'white' } = {}) {
-    conditions = { venue, ball };
+  // ---- Venue, ball and the draggable landing spot (SPEC 13.2, 13.7) ----
+
+  /** venue: a VENUES entry, or venueId: its id. ball: 'red' | 'white' | 'pink' (pink = night). */
+  function setConditions({ venue = null, venueId = null, ball = 'white' } = {}) {
+    const v = venue && typeof venue === 'object' ? venue : getVenue(venueId ?? venue);
+    const kind = BALL_COLORS[ball] ? ball : 'white';
+    look = { night: kind === 'pink', ball: kind, sky: v?.sky ?? DEFAULT_GROUND.sky, stands: v?.stands ?? DEFAULT_GROUND.stands };
+    paintLook();
+    ballEl.setAttribute('stroke', BALL_COLORS[kind].rim);
+    root.classList.toggle('sc--night', look.night);
+    nightShade.setAttribute('visibility', look.night ? 'visible' : 'hidden');
+    rebuildBackground();
+    fieldBg.replaceChildren();
+    drawFieldCamBackground(fieldBg);
   }
+
+  // Drag limits, batter-relative metres: across from 1.0 m outside off to
+  // 0.6 m outside leg (0 = middle stump), along 0.5 m to 12 m from the stumps.
+  const DRAG_X = [-1.0, 0.6];
+  const DRAG_Z = [0.5, 12];
   let markerDrag = null;
-  function enableMarkerDrag(onMove) {
-    markerDrag = typeof onMove === 'function' ? onMove : null;
+  let dragId = null;
+  let dragSpot = null;
+
+  // Screen point -> spot on the ground, through the pitch cam.
+  function groundAt(clientX, clientY) {
+    const m = root.getScreenCTM();
+    if (!m) return null;
+    const p = new DOMPoint(clientX, clientY).matrixTransform(m.inverse());
+    const sc = (p.y - cam.horizon) / cam.h;
+    if (!(sc > 0)) return null;
+    const wx = (CX - p.x) / (cam.dir * sc);
+    const wz = cam.z + (cam.dir * cam.focal) / sc;
+    const r2 = (v) => Math.round(v * 100) / 100;
+    return {
+      x: r2(Math.max(DRAG_X[0], Math.min(DRAG_X[1], wx * -off))),
+      z: r2(Math.max(DRAG_Z[0], Math.min(DRAG_Z[1], wz))),
+    };
+  }
+  function dragTo(e) {
+    const spot = groundAt(e.clientX, e.clientY);
+    if (!spot || (dragSpot && spot.x === dragSpot.x && spot.z === dragSpot.z)) return;
+    dragSpot = spot;
+    const [sx, sy, sc] = project(spot.x * -off, 0, spot.z);
+    set(marker, { cx: sx, cy: sy, rx: 0.24 * sc, ry: 0.09 * sc, visibility: 'visible' });
+    if (markerDrag) markerDrag({ ...spot });
+  }
+  const onDown = (e) => {
+    if (!markerDrag || dragId !== null || pitchCam.classList.contains('sc-off')) return;
+    if (e.button !== undefined && e.button > 0) return;
+    e.preventDefault();
+    dragId = e.pointerId;
+    try { root.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+    marker.classList.add('sc-marker--held');
+    dragTo(e);
+  };
+  const onMove = (e) => {
+    if (e.pointerId !== dragId) return;
+    e.preventDefault();
+    dragTo(e);
+  };
+  const onUp = (e) => {
+    if (e.pointerId !== dragId) return;
+    dragId = null;
+    marker.classList.remove('sc-marker--held');
+  };
+  const DRAG_EVENTS = [['pointerdown', onDown], ['pointermove', onMove], ['pointerup', onUp], ['pointercancel', onUp]];
+
+  /** onMove({x, z}) gets each new spot, already clamped; null turns dragging off. */
+  function enableMarkerDrag(onMoveFn) {
+    const next = typeof onMoveFn === 'function' ? onMoveFn : null;
+    if (next && !markerDrag) {
+      for (const [type, fn] of DRAG_EVENTS) root.addEventListener(type, fn);
+      root.style.touchAction = 'none';
+      root.classList.add('sc--drag');
+    } else if (!next && markerDrag) {
+      for (const [type, fn] of DRAG_EVENTS) root.removeEventListener(type, fn);
+      root.style.touchAction = '';
+      root.classList.remove('sc--drag');
+      marker.classList.remove('sc-marker--held');
+      dragId = null;
+    }
+    markerDrag = next;
+    dragSpot = null;
   }
 
   return {
@@ -1078,28 +1218,60 @@ const lerpPt = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t)];
 
 function buildDefs(root) {
   const defs = svg('defs', {}, root);
-  const grad = (id, stops, attrs = {}) => {
+  const grad = (id, n, attrs = {}) => {
     const g = svg('linearGradient', { id, x1: 0, y1: 0, x2: 0, y2: 1, ...attrs }, defs);
-    for (const [offset, color] of stops) svg('stop', { offset, 'stop-color': color }, g);
+    return Array.from({ length: n }, (_, i) => svg('stop', { offset: i / (n - 1) }, g));
   };
-  grad('sc-sky', [[0, '#0b1d33'], [1, '#2a4d6e']]);
-  grad('sc-pitch', [[0, '#c9b483'], [1, '#d8c597']]);
-  grad('sc-stand', [[0, 'rgba(5,10,20,0.9)'], [1, 'rgba(5,10,20,0.45)']]);
-  const rg = svg('radialGradient', { id: 'sc-ball', cx: 0.35, cy: 0.35, r: 0.7 }, defs);
-  svg('stop', { offset: 0, 'stop-color': '#ff8a80' }, rg);
-  svg('stop', { offset: 0.6, 'stop-color': '#c1121f' }, rg);
-  svg('stop', { offset: 1, 'stop-color': '#7a0c14' }, rg);
-  const fg = svg('radialGradient', { id: 'sc-field', cx: 0.5, cy: 0.5, r: 0.5 }, defs);
-  svg('stop', { offset: 0, 'stop-color': '#3a8a47' }, fg);
-  svg('stop', { offset: 1, 'stop-color': '#256b33' }, fg);
+  const radial = (id, offsets, attrs = {}) => {
+    const g = svg('radialGradient', { id, cx: 0.5, cy: 0.5, r: 0.5, ...attrs }, defs);
+    return offsets.map((offset) => svg('stop', { offset }, g));
+  };
+  const sky = grad('sc-sky', 2);
+  grad('sc-pitch', 2).forEach((st, i) => st.setAttribute('stop-color', ['#c9b483', '#d8c597'][i]));
+  const stand = grad('sc-stand', 2);
+  const ball = radial('sc-ball', [0, 0.6, 1], { cx: 0.35, cy: 0.35, r: 0.7 });
+  const field = radial('sc-field', [0, 1]);
+  // Floodlight glow, only drawn at night.
+  radial('sc-glow', [0, 0.25, 1]).forEach((st, i) => {
+    set(st, { 'stop-color': '#fff6d8', 'stop-opacity': [0.95, 0.4, 0][i] });
+  });
+  radial('sc-vignette', [0.45, 1], { gradientUnits: 'userSpaceOnUse', cx: CX, cy: 134, r: 190 }).forEach((st, i) => {
+    set(st, { 'stop-color': '#020814', 'stop-opacity': [0, 0.5][i] });
+  });
   // Crowd: a tile of coloured dots.
   const crowd = svg('pattern', { id: 'sc-crowd', width: 7, height: 6, patternUnits: 'userSpaceOnUse' }, defs);
-  svg('rect', { width: 7, height: 6, fill: '#1b2635' }, crowd);
+  const crowdBg = svg('rect', { width: 7, height: 6 }, crowd);
   const dots = [[1.5, 1.5, '#e05a5a'], [5, 1.2, '#f2c14e'], [3.2, 4.2, '#7fb7e6'], [6.2, 4.8, '#f4f4ee'], [0.4, 4.6, '#9be07f']];
   for (const [cx, cy, fill] of dots) svg('circle', { cx, cy, r: 1.05, fill }, crowd);
   const clip = svg('clipPath', { id: 'sc-field-clip' }, defs);
   const [cx, cy] = fpos(0, 0);
   svg('circle', { cx, cy, r: ROPE * FS + 3 }, clip);
+  defStops = { sky, stand, ball, field, crowdBg };
+  paintLook();
+}
+
+// Colours of the shared gradients for the current look.
+function paintLook() {
+  if (!defStops) return;
+  const { sky, stand, ball, field, crowdBg } = defStops;
+  const paint = (stops, colors, opacities = []) => stops.forEach((st, i) => {
+    st.setAttribute('stop-color', colors[i]);
+    if (opacities[i] != null) st.setAttribute('stop-opacity', opacities[i]);
+  });
+  const b = BALL_COLORS[look.ball] ?? BALL_COLORS.red;
+  paint(ball, [b.light, b.mid, b.dark]);
+  if (look.night) {
+    paint(sky, ['#02060d', '#0d1a2e']);
+    // Dark at the top of the stands, lit lower down near the field.
+    paint(stand, ['#03070f', '#03070f'], [0.85, 0.12]);
+    paint(field, ['#47a35a', '#2c7a3b']);
+    crowdBg.setAttribute('fill', '#141c28');
+  } else {
+    paint(sky, [shade(look.sky, -0.25), shade(look.sky, 0.3)]);
+    paint(stand, [look.stands[1], look.stands[0]], [0.62, 0.5]);
+    paint(field, ['#3a8a47', '#256b33']);
+    crowdBg.setAttribute('fill', shade(look.stands[0], -0.55));
+  }
 }
 
 // Draws for the current camera: the far rope, boards, sightscreen and stands
@@ -1115,8 +1287,10 @@ function drawPitchCamBackground(g) {
   const standTop = cam.dir > 0 ? boardTop - 55 : -400;
   svg('rect', { x: -2000, y: standTop, width: 4400, height: boardTop - standTop, fill: 'url(#sc-crowd)' }, g);
   svg('rect', { x: -2000, y: standTop, width: 4400, height: boardTop - standTop, fill: 'url(#sc-stand)' }, g);
+  if (cam.dir > 0) svg('rect', { x: -2000, y: standTop - 3, width: 4400, height: 4, fill: look.night ? '#1a2230' : look.stands[2] }, g);
+  if (look.night) drawFloodlights(g, boardTop);
   // Advertising boards and the sightscreen behind the batter.
-  const boardColors = ['#1f5fbf', '#d4213d', '#0f6b3a', '#f2b705'];
+  const boardColors = ['#1f5fbf', look.stands[1], '#0f6b3a', '#f2b705'];
   for (let i = -14; i < 14; i++) {
     const [x0] = project(i * 8, 0, beyond(1));
     const [x1] = project(i * 8 + 8, 0, beyond(1));
@@ -1124,10 +1298,13 @@ function drawPitchCamBackground(g) {
   }
   const [sx0, sy0] = project(-3.5, 0, beyond(2));
   const [sx1, sy1] = project(3.5, 3.6, beyond(2));
-  svg('rect', { x: Math.min(sx0, sx1), y: sy1, width: Math.abs(sx1 - sx0), height: sy0 - sy1, fill: '#dfe6e3' }, g);
+  // Black sightscreens for the white and pink balls, as in real cricket.
+  const screenFill = look.ball === 'red' ? '#dfe6e3' : '#1d232b';
+  svg('rect', { x: Math.min(sx0, sx1), y: sy1, width: Math.abs(sx1 - sx0), height: sy0 - sy1, fill: screenFill }, g);
 
   // Outfield with mowing stripes.
-  svg('rect', { x: -2000, y: ropeY, width: 4400, height: 2000, fill: '#2f7d3c' }, g);
+  const grass = look.night ? ['#379046', '#3f9b4e'] : ['#2f7d3c', '#36883f'];
+  svg('rect', { x: -2000, y: ropeY, width: 4400, height: 2000, fill: grass[0] }, g);
   const zNear = cam.z + cam.dir * 1.5;
   const [zLo, zHi] = [Math.min(far, zNear), Math.max(far, zNear)];
   for (let z = zLo, i = 0; z < zHi; z += 5, i++) {
@@ -1136,7 +1313,7 @@ function drawPitchCamBackground(g) {
     const b = project(120, 0, z);
     const c = project(120, 0, Math.min(zHi, z + 5));
     const d = project(-120, 0, Math.min(zHi, z + 5));
-    svg('polygon', { points: pts([a, b, c, d]), fill: '#36883f' }, g);
+    svg('polygon', { points: pts([a, b, c, d]), fill: grass[1] }, g);
   }
   svg('line', { x1: -2000, y1: ropeY, x2: 2400, y2: ropeY, stroke: '#f4f4ee', 'stroke-width': 1 }, g);
 
@@ -1170,10 +1347,20 @@ function drawPitchCamBackground(g) {
   }
 }
 
+// Four floodlight towers above the stands, the outer pair nearer and taller.
+// Drawn in screen space so the lamps stay in view in both cameras.
+function drawFloodlights(g, boardTop) {
+  for (const [x, top, w] of [[106, 11, 15], [152, 19, 10], [248, 19, 10], [294, 11, 15]]) {
+    svg('rect', { x: x - 0.7, y: top, width: 1.4, height: Math.max(0, boardTop - top), fill: '#2a3240' }, g);
+    svg('circle', { cx: x, cy: top + 2, r: w * 2.6, fill: 'url(#sc-glow)' }, g);
+    svg('rect', { x: x - w / 2, y: top - 1, width: w, height: w * 0.45, rx: 1, fill: '#fff8de', stroke: '#2a3240', 'stroke-width': 0.6 }, g);
+  }
+}
+
 function drawFieldCamBackground(g) {
   const [cx, cy] = fpos(0, 0);
   svg('rect', { x: -2000, y: -2000, width: 4400, height: 4400, fill: 'url(#sc-crowd)' }, g);
-  svg('rect', { x: -2000, y: -2000, width: 4400, height: 4400, fill: 'rgba(5,10,20,0.7)' }, g);
+  svg('rect', { x: -2000, y: -2000, width: 4400, height: 4400, fill: look.night ? 'rgba(3,7,15,0.55)' : rgba(look.stands[0], 0.7) }, g);
   svg('circle', { cx, cy, r: (ROPE + 3) * FS, fill: '#1d2a3a' }, g);
   svg('circle', { cx, cy, r: (ROPE + 2) * FS, fill: 'url(#sc-field)' }, g);
   const stripes = svg('g', { 'clip-path': 'url(#sc-field-clip)' }, g);
@@ -1185,4 +1372,11 @@ function drawFieldCamBackground(g) {
   svg('circle', { cx, cy, r: 27.4 * FS, fill: 'none', stroke: 'rgba(255,255,255,0.45)', 'stroke-width': 0.8, 'stroke-dasharray': '3 3' }, g);
   const [px, py] = fpos(-1.52, -11.3);
   svg('rect', { x: px, y: py, width: 3.04 * FS, height: 22.6 * FS, fill: '#d2bf90', rx: 1 }, g);
+  if (look.night) {
+    const d = (ROPE + 12) * FS * Math.SQRT1_2;
+    for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      svg('circle', { cx: cx + sx * d, cy: cy + sy * d, r: 30, fill: 'url(#sc-glow)' }, g);
+      svg('circle', { cx: cx + sx * d, cy: cy + sy * d, r: 3.5, fill: '#fff8de', stroke: '#2a3240', 'stroke-width': 0.8 }, g);
+    }
+  }
 }

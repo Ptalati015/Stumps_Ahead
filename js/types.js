@@ -26,6 +26,8 @@
  * @property {'easy'|'normal'|'hard'} difficulty
  * @property {'user'|'ai'} battingFirst
  * @property {number} [seed]
+ * @property {string} [venueId]          js/data/venues.js id; visual only, the engine ignores it
+ * @property {'red'|'white'|'pink'} [ball]   pink = night mode in the scene; visual only
  */
 
 /** @typedef {Object} BowlInput

@@ -256,3 +256,10 @@
   .pl-shot { min-height: 48px; padding: 6px 2px; font-size: 15px; }
   .pl-shots .pl-hint { font-size: 13px; }
 }
+
+/* Phase 4: the landing ring can be dragged while bowling (SPEC 13.2). */
+.sc--drag { cursor: grab; }
+.sc--drag .sc-marker { stroke-width: 2; animation: sc-ring 1.2s ease-in-out infinite; }
+.sc--drag .sc-marker--held { animation: none; fill: rgba(255, 210, 63, 0.45); }
+@keyframes sc-ring { 50% { stroke-opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .sc--drag .sc-marker { animation: none; } }
