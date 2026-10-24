@@ -542,6 +542,7 @@ Talati's feedback on v1.1.0: give venue choice its own, better-looking screen, a
 - After the bounce, the ball travels in a straight line, with no more swing. Spin turn stays as now: straight in the air, with the turn after the bounce.
 - The ball's x position is kept within the pitch (|x| ≤ 1.52 m) for the whole path. The only exception is a delivery the engine already called a wide, which may finish outside.
 - The landing spot (`path.bounce`) and the arrival line are unchanged, so outcomes and the marker still agree.
+- Exception: at the far-corner legal spots (for example x -0.9, z 12), the old straight arrival line already ran off the pitch. There the arrival is pulled in to 1.52 m, and the deviation test checks only the air phase.
 
 **Ownership exception:** Ayush owns `deliveryPath()` and `tests/scene-path.test.js` for this fix only. Joel doesn't touch that function in this phase, so the two PRs don't overlap.
 
