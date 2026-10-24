@@ -2,12 +2,13 @@
 // Pure: no DOM. Every exported function that changes the match returns a new
 // MatchState and leaves the one passed in untouched. Shapes: js/types.js.
 import { createRng, forkRng } from './rng.js';
-import { prepareDelivery, resolveOutcome, commentaryFor } from './outcomes.js';
+import { prepareDelivery, resolveOutcome, commentaryFor, shotFlight } from './outcomes.js';
 
 export { aiChooseBowler, aiBowl, aiBat } from './ai.js';
 
 export const BALLS_PER_OVER = 6;
 const SALT_DELIVERY = 0x5eed;
+const SALT_FLIGHT = 0xf117;
 
 const clone = (state) => structuredClone(state);
 
@@ -185,6 +186,9 @@ export function playBall(state, bowl, bat) {
       { batter: batter.name, bowler: bowler.name, fielder: fielder.name },
       rng,
     ),
+    // Where the ball went, for the scene (SPEC 12.2). Its own rng stream, so
+    // it never changes the score.
+    ...shotFlight({ outcome, bat, extra: delivery.extra }, forkRng(state.rngState, SALT_FLIGHT)),
     // Extra fields for the play screen.
     shot: outcome.shot,
     delivery,

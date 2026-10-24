@@ -4,8 +4,11 @@ import {
   setBowler, playBall, aiChooseBowler, aiBowl, aiBat, availableBowlers, previewDelivery,
   currentInnings, playerById, teamByCode, isUserBatting, oversText, runRate, chaseInfo, maxOversPerBowler,
 } from '../../engine/match.js';
-import { SHOTS, SHOT_LABELS, LINES, LENGTHS, LINE_LABELS, LENGTH_LABELS, TIMING_WINDOWS } from '../../engine/outcomes.js';
+import {
+  SHOTS, SHOT_LABELS, LINES, LENGTHS, LINE_LABELS, LENGTH_LABELS, TIMING_WINDOWS, DEFAULT_AIM, OFFSET_STEP_M,
+} from '../../engine/outcomes.js';
 import { createScene } from '../scene/scene.js';
+import { attachSwipe, dragToOffset, clampOffset } from '../input/swipe.js';
 
 const RUN_UP_MS = 1100;
 const PAUSE_AFTER_BALL_MS = 1100;
@@ -74,6 +77,13 @@ export function mount(root, props, navigate) {
   screen.append(scoreSlot, players, pitchWrap, overRow, commentary, controls);
   root.append(screen);
   const scene = createScene(pitchWrap);
+  // Lower half of the delivery view takes drags and swipes (SPEC 12.1).
+  // Positioned through CSSOM so it works under the strict CSP; Joel styles .pl-swipe.
+  const swipeZone = el('div', 'pl-swipe');
+  Object.assign(swipeZone.style, { position: 'absolute', left: '0', right: '0', bottom: '0', height: '50%', touchAction: 'none', zIndex: '3' });
+  swipeZone.hidden = true;
+  pitchWrap.append(swipeZone);
+  let detachSwipe = () => {};
 
   // Joel's shared scoreboard, if it is there; the mini score is the fallback.
   let renderScoreboard = null;
@@ -141,14 +151,24 @@ export function mount(root, props, navigate) {
   }
 
   // ---- Scene ----
+  let camera = null;
+  const strikerBats = () => playerById(state, currentInnings(state).strikerId)?.bats ?? 'R';
   function resetBall() {
     const inn = currentInnings(state);
     const bowler = inn.bowlerId ? playerById(state, inn.bowlerId) : null;
+    // Behind the batter when the user bats, behind the bowler when they bowl.
+    const wanted = isUserBatting(state) ? 'batting' : 'bowling';
+    if (wanted !== camera) {
+      camera = wanted;
+      scene.setCamera?.(wanted);
+    }
     scene.newBall({
       batColors: teamByCode(state, inn.battingTeam).colors,
       bowlColors: teamByCode(state, inn.bowlingTeam).colors,
       spinner: bowler?.bowlType === 'spin',
     });
+    scene.setBatter?.({ bats: strikerBats(), offsetX: 0 });
+    scene.showAim?.(null);
     flash.textContent = '';
     flash.className = 'pl-flash';
     speed.textContent = '';
@@ -210,61 +230,128 @@ export function mount(root, props, navigate) {
     else showBowlingControls();
   }
 
-  // User bats: AI bowls, the user taps a shot.
+  // User bats: AI bowls. Before release the user can shuffle across the
+  // crease; after it, swipe (or tap a shot button) to play.
+  let loftOn = false;
   function userBats() {
     const bowl = aiBowl(state);
     const delivery = previewDelivery(state, bowl);
-    // What a leave would bring, so an unplayed ball heads for the stumps when it should.
-    const ifLeft = playBall(state, bowl, { shot: 'leave', timingMs: null }).ball;
+    const bats = strikerBats();
     scene.setMarker(delivery);
     controls.textContent = '';
     controls.className = 'pl-controls pl-shots';
     let played = false;
     let releaseAt = null;
+    let offsetX = 0;
+
+    // Movement: ◀ ▶ move the batter that way on screen. A right-hander's
+    // off side is screen right, so screen left is toward his leg side.
+    const screenLeftSign = bats === 'L' ? -1 : 1;
+    const setOffset = (m) => {
+      offsetX = clampOffset(m);
+      scene.setBatter?.({ bats, offsetX });
+      moveLeft.disabled = releaseAt != null || offsetX * screenLeftSign >= 0.6;
+      moveRight.disabled = releaseAt != null || offsetX * screenLeftSign <= -0.6;
+    };
+    const step = (dir) => {
+      if (releaseAt != null || played) return;
+      setOffset(offsetX + dir * screenLeftSign * OFFSET_STEP_M);
+    };
+    const moveLeft = button('pl-btn pl-move pl-move-left', '◀', () => step(1));
+    const moveRight = button('pl-btn pl-move pl-move-right', '▶', () => step(-1));
+    moveLeft.setAttribute('aria-label', 'Move batter left');
+    moveRight.setAttribute('aria-label', 'Move batter right');
+    const loftBtn = button('pl-btn pl-loft', 'Loft', () => {
+      loftOn = !loftOn;
+      loftBtn.setAttribute('aria-pressed', String(loftOn));
+      loftBtn.classList.toggle('pl-picked', loftOn);
+    });
+    loftBtn.setAttribute('aria-pressed', String(loftOn));
+    loftBtn.classList.toggle('pl-picked', loftOn);
+    loftBtn.title = 'Swipes go in the air';
+    const moveRow = el('div', 'pl-move-row');
+    Object.assign(moveRow.style, { gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: '1fr 2fr 1fr', gap: '8px' });
+    moveRow.append(moveLeft, loftBtn, moveRight);
+
     const buttons = SHOTS.map((shot) => {
-      const b = button('pl-btn pl-shot', SHOT_LABELS[shot], () => playShot(shot));
+      const b = button('pl-btn pl-shot', SHOT_LABELS[shot], () => playShot({ shot, aimDeg: DEFAULT_AIM[shot], aerial: shot === 'loft' }));
       b.dataset.shot = shot;
       b.append(el('kbd', 'pl-key', SHOT_KEYS[shot].toUpperCase()));
       b.disabled = true;
       return b;
     });
-    controls.append(...buttons);
-    const hint = el('p', 'pl-hint', 'Tap a shot as the ball reaches the crease. No tap = leave.');
+    controls.append(moveRow, ...buttons);
+    const hint = el('p', 'pl-hint', 'Drag or ◀ ▶ to move before the ball. Then swipe on the pitch to hit, tap to defend, or use a shot button.');
     controls.append(hint);
 
+    // Swipe zone: lower half of the delivery view.
+    let dragFrom = null;
+    const swipe = attachSwipe(swipeZone, {
+      mode: () => (played ? 'off' : releaseAt == null ? 'move' : 'swipe'),
+      onMove: (dx) => {
+        if (releaseAt != null) return;
+        dragFrom ??= offsetX;
+        setOffset(dragToOffset(dragFrom, dx, bats));
+      },
+      onMoveEnd: () => (dragFrom = null),
+      onAim: (aim) => scene.showAim?.(aim),
+      onShot: ({ shot, aimDeg, aerial, atMs }) => playShot({ shot, aimDeg, aerial }, atMs),
+      zoneHeight: () => swipeZone.clientHeight,
+      loft: () => loftOn,
+      bats: () => bats,
+    });
+    swipeZone.hidden = false;
+    detachSwipe = () => {
+      swipe.detach();
+      swipeZone.hidden = true;
+    };
+
     function onKey(e) {
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        step(e.key === 'ArrowLeft' ? 1 : -1);
+        return;
+      }
       const shot = Object.keys(SHOT_KEYS).find((k) => SHOT_KEYS[k] === e.key.toLowerCase());
-      if (shot) playShot(shot);
+      if (shot) playShot({ shot, aimDeg: DEFAULT_AIM[shot], aerial: shot === 'loft' });
     }
-    function playShot(shot) {
+    function playShot({ shot, aimDeg, aerial }, atMs = performance.now()) {
       if (played || releaseAt == null) return;
       played = true;
-      scene.swing(shot);
-      finish(shot, performance.now() - releaseAt - delivery.travelMs);
+      scene.showAim?.(null);
+      scene.swing(shot, { aimDeg, aerial });
+      finish({ shot, aimDeg, aerial }, atMs - releaseAt - delivery.travelMs);
     }
-    function finish(shot, timingMs) {
+    function finish({ shot, aimDeg = 0, aerial = false }, timingMs) {
       played = true;
       setKeyHandler(null);
-      buttons.forEach((b) => {
-        b.disabled = true;
-        if (b.dataset.shot === shot) b.classList.add('pl-picked');
-      });
-      const bat = shot === 'leave' ? { shot: 'leave', timingMs: null } : { shot, timingMs: Math.round(timingMs) };
+      detachSwipe();
+      [moveLeft, moveRight, loftBtn, ...buttons].forEach((b) => (b.disabled = true));
+      buttons.forEach((b) => b.dataset.shot === shot && b.classList.add('pl-picked'));
+      const bat = shot === 'leave'
+        ? { shot: 'leave', timingMs: null, offsetX }
+        : { shot, timingMs: Math.round(timingMs), offsetX, aimDeg, aerial };
       const result = playBall(state, bowl, bat);
       const label = shot === 'leave' || delivery.extra === 'wide' ? null : timingLabel(result.ball.timing, bat.timingMs);
       afterBall(result, label);
     }
     setKeyHandler(onKey);
+    setOffset(0);
 
     commentary.textContent = `${playerById(state, currentInnings(state).bowlerId).name} runs in...`;
     speed.textContent = `${delivery.kph} kph`;
     scene.runUp(RUN_UP_MS);
     later(() => {
+      // Position locks at release.
       releaseAt = performance.now();
+      setOffset(offsetX);
       buttons.forEach((b) => (b.disabled = false));
+      // What a leave would bring, so an unplayed ball heads for the stumps when it should.
+      const ifLeft = playBall(state, bowl, { shot: 'leave', timingMs: null, offsetX }).ball;
       scene.release(delivery, { pre: ifLeft });
       later(() => {
-        if (!played) finish('leave', null);
+        swipe.flush();
+        if (!played) finish({ shot: 'leave' }, null);
       }, delivery.travelMs + TIMING_WINDOWS.edge);
     }, RUN_UP_MS);
   }
@@ -376,13 +463,16 @@ export function mount(root, props, navigate) {
     const delivery = previewDelivery(state, bowl);
     const bat = aiBat(state, bowl);
     const result = playBall(state, bowl, bat);
+    scene.setBatter?.({ bats: strikerBats(), offsetX: bat.offsetX ?? 0 });
     scene.setMarker(delivery);
     const accuracyText = `Accuracy ${Math.round(bowl.accuracy * 100)}%`;
     commentary.textContent = `${accuracyText}. ${playerById(state, currentInnings(state).bowlerId).name} runs in...`;
     speed.textContent = `${delivery.kph} kph`;
     scene.runUp(RUN_UP_MS);
     later(() => {
-      const swing = bat.shot === 'leave' ? null : { shot: bat.shot, atMs: delivery.travelMs + clampMs(bat.timingMs) };
+      const swing = bat.shot === 'leave'
+        ? null
+        : { shot: bat.shot, atMs: delivery.travelMs + clampMs(bat.timingMs), aimDeg: bat.aimDeg, aerial: bat.aerial };
       scene.release(delivery, { pre: result.ball, swing });
       // The result plays out from when the bat meets the ball (or the ball passes).
       const decided = bat.shot === 'leave' ? delivery.travelMs + 150 : delivery.travelMs + Math.max(0, clampMs(bat.timingMs));
@@ -409,6 +499,7 @@ export function mount(root, props, navigate) {
     timeouts.clear();
     frames.clear();
     setKeyHandler(null);
+    detachSwipe();
     scene.destroy();
     root.textContent = '';
   };
