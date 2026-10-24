@@ -147,7 +147,7 @@
 .pl-move-row {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 1fr 1.6fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 .pl-move-left, .pl-move-right { min-height: 48px; font-size: 22px; line-height: 1; }
