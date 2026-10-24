@@ -2,6 +2,11 @@
 
 All notable changes to Stumps Ahead. Versions follow semantic versioning: features bump the minor version, fixes the patch.
 
+## 1.2.0 - 2026-10-24
+
+- Venue screen: choosing the ground is now its own screen between Match Setup and the toss. It shows illustrated cards for both teams' home grounds, with Home/Away tags, city and a short description, and night versions with floodlights for a pink ball.
+- Fix: inswing and outswing (most visibly on yorkers) no longer swerve off the pitch and back. Swing is now a smooth curve in the air, and the ball stays on the pitch unless it is a wide.
+
 ## 1.1.0 - 2026-10-24
 
 - Bowling: drag the landing ring to pick exactly where the ball pitches. The Line and Length buttons still work as presets.
