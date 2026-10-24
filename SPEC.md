@@ -583,6 +583,7 @@ Talati's feedback on v1.2.0 covers three things. Some balls on middle stump, inc
   - play.js (Ayush) computes the point with the existing `releaseXFor` and `arrivalFromPitch` helpers in outcomes.js, plus the expected swing.
   - The scene (Joel) draws it with `scene.setArrivalMarker({ x, wide } | null)`.
   - It is hidden while the user bats and once the ball is released.
+- The ring's nearest legal spot is now 1.5 m in front of the batter's stumps (`PITCH_LIMITS.zMin`, was 0.5 m), so it can't sit behind the crease. The yorker bucket is still z < 2.5.
 - **Scene:** the scene draws the wide where the engine put it, from `delivery.arrivalX`, which is added to the returned delivery. It no longer uses a fixed off or leg position.
 - **Balance:** compare wides per over against v1.2.0, AI vs AI on Normal. It should stay within about ±30%. If it falls a lot, raise the scatter slightly rather than bringing back random wides.
 
