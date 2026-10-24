@@ -618,6 +618,7 @@ Talati's feedback on v1.2.0 covers three things. Some balls on middle stump, inc
 - the shot buttons (Defend, Drive, Cut, Pull, Loft) with their default directions, and the keyboard shortcuts;
 - moving the batter with ◀ ▶ and by dragging before release (12.1). The drag zone stays for that, but after release it no longer reads a swipe;
 - the hit line on the field cam after the shot, and every shot animation.
+- lofted shots, through the **Loft** button. It always plays `aerial: true` and keeps the visible lofted flight from 12.1, so removing the Aerial toggle doesn't remove lofting.
 
 **Code:**
 - `js/ui/input/swipe.js` keeps only the move helpers (`dragToOffset`, `clampOffset`), or they move into play.js. Remove `swipeToAim` and its tests.
