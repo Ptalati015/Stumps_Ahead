@@ -216,6 +216,7 @@ test('scoring feels like T20 at normal difficulty (about 7 to 12 an over)', () =
 });
 
 // ---- Phase 3: movement, aim and flight (SPEC 12.2) ----
+import { commentaryFor } from '../js/engine/outcomes.js';
 import { ROPE_M, ANGLE_ERROR, DEFAULT_AIM, effectiveLine, shotFromAim, resolveOutcome } from '../js/engine/outcomes.js';
 
 const SHOT_CYCLE = ['defend', 'drive', 'pull', 'cut', 'loft', 'leave'];
@@ -325,12 +326,18 @@ test('a batter moved to the leg side is bowled more often by a straight ball', (
 });
 
 test('drive commentary follows where the ball went', () => {
-  const s = started();
-  const words = { 0: 'straight drive', [-40]: 'cover drive', 30: 'on drive' };
-  for (const [aim, word] of Object.entries(words)) {
-    const { ball } = findBall(s, (r) => r.ball.runs === 4 && r.ball.timing === 'perfect' && !r.ball.extra, { shot: 'drive', timingMs: 0, aimDeg: Number(aim) });
-    assert.match(ball.commentary, new RegExp(word, 'i'));
+  // {how} and {where} fill from the shot angle; the line itself is a template.
+  const lines = { four: ['{how} {where}'] };
+  const words = { 0: ['straight drive', 'straight down the ground'], [-40]: ['cover drive', 'to cover'], 30: ['on drive', 'to mid-wicket'] };
+  for (const [aim, [how, where]] of Object.entries(words)) {
+    const text = commentaryFor({ runs: 4, extra: null, wicketKind: null, timing: 'perfect', shot: 'drive', angleDeg: Number(aim) }, { batter: 'A' }, createRng(1), { lines });
+    assert.equal(text, `a ${how} ${where}`.replace('a cover', 'a glorious cover').replace('a straight', 'a crisp straight').replace('a on', 'a lovely on'));
   }
+  // The in-match line uses the same fill and never leaves a placeholder behind.
+  const s = started();
+  const { ball } = findBall(s, (r) => r.ball.runs === 4 && !r.ball.extra, { shot: 'drive', timingMs: 0, aimDeg: 0 });
+  assert.doesNotMatch(ball.commentary, /[{}]/);
+  assert.match(ball.commentary, /^FOUR!/);
 });
 
 // ---- Phase 4: landing spot and variations (SPEC 13.3) ----
